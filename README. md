@@ -10,12 +10,6 @@
 | 2       | 24000493       | Maitra Prajapati   |
 | 3       | 24000605       | Vikas Patanwadiya  |
 
-## Project Overview
-
-An automated attendance system using facial recognition technology to eliminate manual processes, reduce proxy attendance, and provide real-time tracking for academic institutions.
-
-## Project Structure
-
 ```
 ├── docs/
 ├── src/
@@ -52,24 +46,5 @@ pip install -r requirements.txt
 python src/main.py
 ```
 
-Expected output: A window titled **"Pipeline Test"** displaying the Canny edge output with the text `CG & IP Pipeline OK`.
 
-## Technology Stack
 
-| Component            | Tool                              |
-|----------------------|-----------------------------------|
-| Programming Language | Python                            |
-| Graphics Library     | OpenCV, dlib / face_recognition   |
-| Image Processing     | TensorFlow / Keras                |
-| GUI                  | Tkinter / CustomTkinter           |
-| IDE                  | VS Code                           |
-| Version Control      | GitHub                            |
-
-## Git Branch Strategy
-
-- `main` — protected, stable code only
-- `feature/ui-setup` — GUI development
-- `feature/image-loader` — image acquisition & preprocessing
-- `feature/face-detection` — face detection module
-- `feature/recognition` — feature extraction & recognition
-- `feature/database` — attendance logging & reporting
