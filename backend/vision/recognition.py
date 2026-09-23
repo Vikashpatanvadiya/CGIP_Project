@@ -18,7 +18,10 @@ from backend.vision.pixel_ops import preprocess_face
 
 # Below this similarity the closest match is still rejected as "Unknown" —
 # required so a stranger's face isn't force-matched to the nearest student.
-MATCH_THRESHOLD = 0.45
+# Calibrated empirically: cosine similarity between LBP histograms of the
+# same person (different frames) lands ~0.85-0.98, while unrelated
+# patches/faces land ~0.3-0.5 — 0.65 sits comfortably in the gap.
+MATCH_THRESHOLD = 0.65
 K_NEIGHBORS = 3
 
 
@@ -35,13 +38,21 @@ def extract_embedding(face_bgr: np.ndarray) -> np.ndarray:
     return lbp_histogram(gray)
 
 
-def _euclidean_similarity(a: np.ndarray, b: np.ndarray) -> float:
-    """Convert Euclidean distance between two normalized histograms into a
-    0..1 similarity score (1 = identical, 0 = maximally different).
+def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    """Cosine similarity between two LBP-histogram feature vectors, per the
+    project doc's "Euclidean Distance / Cosine Similarity" matching step.
+
+    Preferred over a raw Euclidean-distance-to-similarity conversion here: at
+    this vector length (num_grid_cells * bins), Euclidean distance needs a
+    per-configuration max-distance bound to normalize into 0..1, which is
+    easy to get subtly wrong. Cosine similarity is scale-invariant and gives
+    a stable 0..1-ish range (in practice mid-0.9s for the same face across
+    frames, ~0.3-0.5 for unrelated content) without that bookkeeping.
     """
-    distance = float(np.linalg.norm(a - b))
-    max_distance = np.sqrt(2.0)  # both vectors are L1-normalized per cell, bounded
-    return max(0.0, 1.0 - distance / max_distance)
+    denom = float(np.linalg.norm(a) * np.linalg.norm(b))
+    if denom == 0.0:
+        return 0.0
+    return float(np.dot(a, b) / denom)
 
 
 def match_embedding(
@@ -57,7 +68,7 @@ def match_embedding(
         return MatchResult(student_id=None, confidence=0.0, is_match=False)
 
     scored = [
-        (student_id, _euclidean_similarity(query, emb))
+        (student_id, _cosine_similarity(query, emb))
         for student_id, emb in known_embeddings
     ]
     scored.sort(key=lambda pair: pair[1], reverse=True)
