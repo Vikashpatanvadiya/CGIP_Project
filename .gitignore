@@ -1,24 +1,31 @@
-# Python virtual environment
-venv/
-.venv/
-env/
-
-# Python cache
+# Python
 __pycache__/
 *.py[cod]
 *.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
 
-# macOS
-.DS_Store
+# Runtime data (contains face embeddings / attendance records — not checked in)
+data/*.db
+data/embeddings/*
+!data/embeddings/.gitkeep
 
-# IDE
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Editors / OS
 .vscode/
 .idea/
+.DS_Store
 
 # Distribution / packaging
 dist/
 build/
-*.egg-info/
 
 # Logs
 *.log
