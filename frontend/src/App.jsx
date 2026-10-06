@@ -2,11 +2,13 @@
 
 import { useState } from 'react'
 import LiveAttendance from './components/LiveAttendance'
+import GroupPhoto from './components/GroupPhoto'
 import RegisterStudent from './components/RegisterStudent'
 import Reports from './components/Reports'
 
 const TABS = [
   { id: 'live', label: 'Live Attendance', component: LiveAttendance },
+  { id: 'group', label: 'Group Photo', component: GroupPhoto },
   { id: 'register', label: 'Register Student', component: RegisterStudent },
   { id: 'reports', label: 'Reports', component: Reports },
 ]

@@ -13,8 +13,7 @@ import numpy as np
 from flask import Flask, jsonify, request, send_file, Response
 from flask_cors import CORS
 
-from backend.database import models
-from backend.database.db import init_db
+from backend.database import store as models
 from backend.services import report_service
 from backend.services.attendance_service import process_frame
 from backend.services.enrollment_service import register_student, NoFaceDetectedError
@@ -32,6 +31,17 @@ def _decode_base64_image(data_url: str) -> np.ndarray:
     binary = base64.b64decode(data_url)
     array = np.frombuffer(binary, dtype=np.uint8)
     return cv2.imdecode(array, cv2.IMREAD_COLOR)
+
+
+def _face_result_json(r) -> dict:
+    return {
+        "box": {"x": r.box.x, "y": r.box.y, "w": r.box.w, "h": r.box.h},
+        "student_id": r.student_id,
+        "name": r.name,
+        "enrollment_no": r.enrollment_no,
+        "confidence": round(r.confidence, 3),
+        "attendance_marked": r.attendance_marked,
+    }
 
 
 @app.get("/api/health")
@@ -80,16 +90,30 @@ def mark_attendance_from_frame():
         return jsonify(error="could not decode image"), 400
 
     results = process_frame(frame)
-    return jsonify([
-        {
-            "box": {"x": r.box.x, "y": r.box.y, "w": r.box.w, "h": r.box.h},
-            "student_id": r.student_id,
-            "name": r.name,
-            "confidence": round(r.confidence, 3),
-            "attendance_marked": r.attendance_marked,
-        }
-        for r in results
-    ])
+    return jsonify([_face_result_json(r) for r in results])
+
+
+@app.post("/api/attendance/group-photo")
+def mark_attendance_from_group_photo():
+    """Faculty uploads a single group photo; recognize every enrolled student
+    in it and mark their attendance in one shot."""
+    payload = request.get_json(force=True)
+    image_b64 = payload.get("image")
+    if not image_b64:
+        return jsonify(error="image is required"), 400
+
+    photo = _decode_base64_image(image_b64)
+    if photo is None:
+        return jsonify(error="could not decode image"), 400
+
+    results = process_frame(photo)
+    recognized = [r for r in results if r.student_id is not None]
+    return jsonify({
+        "faces_detected": len(results),
+        "recognized": len(recognized),
+        "newly_marked": sum(1 for r in recognized if r.attendance_marked),
+        "results": [_face_result_json(r) for r in results],
+    })
 
 
 @app.get("/api/attendance")
@@ -130,11 +154,21 @@ def export_attendance():
 
 
 def create_app() -> Flask:
-    init_db()
+    models.init_db()
+    app.logger.warning("Database backend: %s", models.BACKEND_NAME)
     return app
 
 
 if __name__ == "__main__":
     # Port 5050, not 5000: macOS's AirPlay Receiver listens on 5000 (IPv6)
     # and will intercept requests with a 403 before Flask ever sees them.
-    create_app().run(debug=True, port=5050)
+    #
+    # use_reloader=False: loading the ArcFace model twice (reloader spawns a
+    # child process) wastes ~600MB RAM and doubles startup time.
+    flask_app = create_app()
+    try:
+        from backend.vision.face_engine import warm_up
+        warm_up()  # load the model now so the first request isn't slow
+    except Exception as exc:  # noqa: BLE001 - don't block startup on model issues
+        flask_app.logger.warning("Face engine warm-up skipped: %s", exc)
+    flask_app.run(debug=True, port=5050, use_reloader=False)

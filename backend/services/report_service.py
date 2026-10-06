@@ -10,7 +10,7 @@ import csv
 import io
 from datetime import date
 
-from backend.database import models
+from backend.database import store as models
 
 # NOTE: openpyxl is imported lazily inside export_xlsx(), not at module load.
 # openpyxl parses XML on import, which pulls in CPython's pyexpat; on some

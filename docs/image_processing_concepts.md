@@ -15,16 +15,32 @@ underlying pixel/matrix/graphics concepts from class are implemented explicitly.
 | **Lab 1/3** — `graphics.h` basics: shapes, colors, simple animation via delay loops | The live GUI (`LiveAttendance.jsx`) redraws the bounding-box overlay on a `<canvas>` every capture cycle — the same "clear, redraw, delay" animation loop taught with `graphics.h`, just running in a browser canvas instead of a Turbo C window. |
 | **k-Nearest Neighbours / distance metrics** (Algorithms & Techniques, §12) | `recognition.py`'s `match_embedding()` scores the query against every enrolled embedding with a Euclidean-distance-based similarity, takes the k closest, and majority-votes the identity — a from-scratch k-NN classifier. |
 
-## Why LBP instead of a deep embedding model
+## Classical (LBP) vs. deep (ArcFace) — and why we use both
 
-The project doc lists both a deep-learning 128-d encoder (FaceNet/dlib) and LBP
-as valid feature-extraction techniques. This implementation uses **LBP +
-distance-based k-NN**:
+The project doc lists both a deep-learning encoder and LBP as valid
+feature-extraction techniques. This project implements **both** and uses each
+where it's strongest:
 
-- No `dlib`/`face_recognition` C++ build step — those can be painful to install
-  across three different laptops/OSes for a group project.
-- It's the technique most directly rooted in the course's pixel-level image
-  processing content (vs. treating a neural network as a black box).
-- `backend/vision/recognition.py` is written so swapping in a deep embedding
-  model later only means changing `extract_embedding()` — the k-NN matching
-  logic stays the same.
+| | Classical — LBP (from scratch) | Deep — ArcFace (InsightFace) |
+|---|---|---|
+| Where | `backend/vision/lbp.py` | `backend/vision/face_engine.py` |
+| Feature | 3776-d LBP histogram (per-pixel texture) | 512-d embedding (trained on millions of faces) |
+| Detector | Haar Cascade (`face_detection.py`) | SCRFD |
+| Strength | Transparent, pixel-level, no model download | High accuracy, separates different people reliably |
+| Weakness | Confuses similar faces/lighting → wrong names | Opaque "black box", needs a model download |
+| Role | The course baseline we benchmark against | The production matcher used by the live app + group photo |
+
+**Why the switch for production matching:** with LBP, once more than one person
+was in frame the system put the wrong name on faces — LBP only captures local
+texture, so different people's histograms overlap. ArcFace is trained so the
+same identity's embeddings cluster tightly and different identities sit far
+apart (a wide cosine-similarity margin), which is what actually fixes the
+confusion and makes multi-face group-photo recognition reliable.
+
+**The classical work is not discarded** — `lbp.py`, `pixel_ops.py`, and
+`drawing.py` remain implemented, unit-tested, and documented as the baseline.
+This "classical vs. deep, compared on the same task" framing is a stronger
+academic result than either alone. The matching math
+(`recognition.match_embedding`, cosine + k-NN) is identical for both embedding
+types; only the acceptance threshold differs (LBP ~0.65, ArcFace ~0.38),
+because the two embedding spaces have different similarity scales.

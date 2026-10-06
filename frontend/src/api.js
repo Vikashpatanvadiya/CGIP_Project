@@ -41,6 +41,14 @@ export async function markAttendanceFromFrame(imageDataUrl) {
   return res.json()
 }
 
+export async function markAttendanceFromGroupPhoto(imageDataUrl) {
+  const res = await request('/attendance/group-photo', {
+    method: 'POST',
+    body: JSON.stringify({ image: imageDataUrl }),
+  })
+  return res.json()
+}
+
 export async function getAttendance(date) {
   const query = date ? `?date=${date}` : ''
   const res = await request(`/attendance${query}`)
