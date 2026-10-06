@@ -77,16 +77,23 @@ Topics/                         Class LAB/Tutorial materials referenced above
 python3 -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python3 -m backend.app          # http://127.0.0.1:5050
+./run-backend.sh                # http://127.0.0.1:5050  (macOS/Linux)
 ```
-> macOS note: the server runs on port **5050**, not 5000 — macOS's AirPlay
-> Receiver squats on port 5000 and will silently 403 your requests.
+On Windows (no helper script): `python -m backend.app`.
 
-**Frontend**
+> **macOS notes:**
+> - The server runs on port **5050**, not 5000 — macOS's AirPlay Receiver
+>   squats on port 5000 and will silently 403 your requests.
+> - `run-backend.sh` points Python at Homebrew's `expat` so Excel export works
+>   on Homebrew Python 3.14.x (the system libexpat is missing a symbol
+>   `openpyxl` needs). If you ever see a `pyexpat` / `libexpat` import error,
+>   run `brew install expat` once. CSV export works regardless.
+
+**Frontend** (separate terminal)
 ```bash
 cd frontend
 npm install
-npm run dev                     # http://localhost:5173
+./../run-frontend.sh            # or: npm run dev  → http://localhost:5173
 ```
 
 **Tests**

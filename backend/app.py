@@ -108,7 +108,12 @@ def export_attendance():
     session_date = date.fromisoformat(date_param) if date_param else date.today()
 
     if fmt == "xlsx":
-        data = report_service.export_xlsx(session_date)
+        try:
+            data = report_service.export_xlsx(session_date)
+        except ImportError:
+            # openpyxl/pyexpat unavailable in this Python env — fall back to CSV
+            # rather than 500ing, so the report is still downloadable.
+            return jsonify(error="Excel export unavailable in this environment; use CSV export instead."), 503
         return send_file(
             __import__("io").BytesIO(data),
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
