@@ -64,16 +64,66 @@ def _day_from_line(line: str) -> int | None:
     return None
 
 
+def _looks_like_class(text: str) -> bool:
+    """True if a line carries class info (a course code or bracketed fields),
+    so it is a description line rather than a date/day header."""
+    return bool(_COURSE_CODE.search(text) or "[" in text)
+
+
+def _build_slot(description: str, day: int | None, start_time: str, end_time: str | None) -> dict:
+    """Extract course code/name/section/room/faculty from a description string."""
+    rest = description.strip().lstrip("●•*-– ").strip()
+
+    code_match = _COURSE_CODE.search(rest)
+    course_code = code_match.group(1) if code_match else None
+
+    section = room = faculty_name = None
+    for b in (x.strip() for x in _BRACKET.findall(rest)):
+        if re.match(r"(?i)section\b", b):
+            section = re.sub(r"(?i)section", "", b).strip()
+        elif room is None:
+            room = b
+        else:
+            faculty_name = b
+
+    name_region = rest[code_match.end():] if code_match else rest
+    course_name = name_region.split("[", 1)[0].strip(" -–●•") or None
+
+    return {
+        "course_code": course_code,
+        "course_name": course_name,
+        "section": section,
+        "day_of_week": day,
+        "day_name": _DAYS[day].title() if day is not None else None,
+        "start_time": start_time,
+        "end_time": end_time,
+        "room": room,
+        "faculty_name": faculty_name,
+    }
+
+
 def parse_timetable_text(text: str) -> list[dict]:
     """Parse pasted timetable text into a de-duplicated list of weekly slots.
 
+    Handles two layouts:
+      1. Time and class on one line:
+         "2:00pm - 3:00pm  CMP513 Computer Graphics [SECTION 1] [A303] [Prof]"
+      2. Time and class on separate lines (portal "list" view):
+         "2:00pm - 3:00pm"
+         "CS236 Theory of Computation [SECTION 2] [A702] [Prof]"
+
     Each slot: {course_code, course_name, section, day_of_week, day_name,
-                start_time, end_time, room, faculty_name}
-    Slots without a resolvable weekday are still returned with day_of_week=None
-    so the UI can let the user assign a day.
+                start_time, end_time, room, faculty_name}. Slots without a
+    resolvable weekday keep day_of_week=None so the UI can assign a day.
     """
     current_day: int | None = None
+    pending: tuple[str, str | None] | None = None  # (start, end) awaiting a description line
     slots: dict[tuple, dict] = {}
+
+    def emit(slot: dict) -> None:
+        key = (slot["course_code"] or slot["course_name"], slot["section"],
+               slot["day_of_week"], slot["start_time"])
+        slots[key] = slot
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -81,58 +131,29 @@ def parse_timetable_text(text: str) -> list[dict]:
             continue
 
         time_match = _TIME_RANGE.search(line)
-        if not time_match:
-            # Header line (date / day) — update the running weekday context.
-            day = _day_from_line(line)
-            if day is not None:
-                current_day = day
-            continue
-
-        start_time = _parse_time(time_match.group(1))
-        end_time = _parse_time(time_match.group(2))
-        if not start_time:
-            continue
-
-        # Everything after the time range is the class description.
-        rest = line[time_match.end():].strip().lstrip("●•*-– ").strip()
-
-        code_match = _COURSE_CODE.search(rest)
-        course_code = code_match.group(1) if code_match else None
-
-        brackets = _BRACKET.findall(rest)
-        section = None
-        room = None
-        faculty_name = None
-        for b in brackets:
-            b = b.strip()
-            if re.match(r"(?i)section\b", b):
-                section = re.sub(r"(?i)section", "", b).strip()
-            elif room is None:
-                room = b
+        if time_match:
+            start_time = _parse_time(time_match.group(1))
+            end_time = _parse_time(time_match.group(2))
+            if not start_time:
+                continue
+            rest = line[time_match.end():].strip().lstrip("●•*-– ").strip()
+            if _looks_like_class(rest):
+                emit(_build_slot(rest, current_day, start_time, end_time))  # layout 1
+                pending = None
             else:
-                faculty_name = b
+                pending = (start_time, end_time)  # layout 2: wait for the class line
+            continue
 
-        # Course name = text between the code and the first bracket.
-        name_region = rest
-        if code_match:
-            name_region = rest[code_match.end():]
-        name_region = name_region.split("[", 1)[0].strip(" -–●•")
-        course_name = name_region or None
+        # Not a time line: either a date/day header or a class-description line.
+        day = _day_from_line(line)
+        if day is not None and not _looks_like_class(line):
+            current_day = day
+            continue
 
-        key = (course_code or course_name, section, current_day, start_time)
-        slots[key] = {
-            "course_code": course_code,
-            "course_name": course_name,
-            "section": section,
-            "day_of_week": current_day,
-            "day_name": _DAYS[current_day].title() if current_day is not None else None,
-            "start_time": start_time,
-            "end_time": end_time,
-            "room": room,
-            "faculty_name": faculty_name,
-        }
+        if pending is not None:
+            emit(_build_slot(line, current_day, pending[0], pending[1]))
+            pending = None
 
-    # Stable ordering: by day then start time (None days last).
     return sorted(
         slots.values(),
         key=lambda s: (s["day_of_week"] if s["day_of_week"] is not None else 99, s["start_time"]),
