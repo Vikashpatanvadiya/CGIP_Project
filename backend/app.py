@@ -2,35 +2,73 @@
 Module Owner: Krishna Patel (24000131) — Database & GUI
 
 Flask REST API — the "API Gateway" block in the system architecture diagram.
-Exposes endpoints for the React frontend to register students, submit camera
-frames for recognition/attendance, and pull attendance reports.
+Exposes endpoints for the React frontend to register users, manage subjects,
+track attendance, submit camera frames for recognition, and export reports.
 """
 
 import base64
+import os
+import sys
+from datetime import date
+from functools import wraps
+from pathlib import Path
+
+# Ensure project root is on sys.path when running `python backend/app.py` directly
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import cv2
 import numpy as np
-from flask import Flask, jsonify, request, send_file, Response
+from flask import Flask, Response, jsonify, request, send_file
 from flask_cors import CORS
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from backend.database import store as models
 from backend.services import report_service
 from backend.services.attendance_service import process_frame
-from backend.services.enrollment_service import register_student, NoFaceDetectedError
+from backend.services.enrollment_service import NoFaceDetectedError, register_student
 
 app = Flask(__name__)
 CORS(app)
 
+SECRET_KEY = os.environ.get("SECRET_KEY", "facial-attendance-system-secret-2025")
+_serializer = URLSafeTimedSerializer(SECRET_KEY, salt="auth_token")
 
-def _decode_base64_image(data_url: str) -> np.ndarray:
+
+def _create_token(user_id: int) -> str:
+    return _serializer.dumps({"user_id": user_id})
+
+
+def _verify_token(token: str) -> dict | None:
+    try:
+        data = _serializer.loads(token, max_age=86400 * 30)
+        return models.get_user_by_id(data["user_id"])
+    except (BadSignature, SignatureExpired, KeyError, TypeError):
+        return None
+
+
+def get_auth_user() -> dict | None:
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+        return _verify_token(token)
+    return None
+
+
+def _decode_base64_image(data_url: str) -> np.ndarray | None:
     """Decode a `data:image/jpeg;base64,...` string (sent by the browser's
     <canvas>.toDataURL()) into a BGR numpy image.
     """
+    if not data_url:
+        return None
     if "," in data_url:
         data_url = data_url.split(",", 1)[1]
-    binary = base64.b64decode(data_url)
-    array = np.frombuffer(binary, dtype=np.uint8)
-    return cv2.imdecode(array, cv2.IMREAD_COLOR)
+    try:
+        binary = base64.b64decode(data_url)
+        array = np.frombuffer(binary, dtype=np.uint8)
+        return cv2.imdecode(array, cv2.IMREAD_COLOR)
+    except Exception:
+        return None
 
 
 def _face_result_json(r) -> dict:
@@ -44,10 +82,417 @@ def _face_result_json(r) -> dict:
     }
 
 
+# ==========================================
+# Health
+# ==========================================
+
 @app.get("/api/health")
 def health():
     return jsonify(status="ok")
 
+
+# ==========================================
+# Auth API
+# ==========================================
+
+@app.post("/api/auth/register")
+def register_user():
+    payload = request.get_json(force=True) or {}
+    email = str(payload.get("email", "")).strip().lower()
+    password = str(payload.get("password", ""))
+    name = str(payload.get("name", "")).strip()
+    role = str(payload.get("role", "faculty")).strip().lower()
+
+    if not email or not password or not name:
+        return jsonify(error="Email, password, and name are required"), 400
+    if len(password) < 6:
+        return jsonify(error="Password must be at least 6 characters"), 400
+    if role not in ("faculty", "student"):
+        return jsonify(error="Role must be either 'faculty' or 'student'"), 400
+
+    existing = models.get_user_by_email(email)
+    if existing:
+        return jsonify(error="An account with this email already exists"), 400
+
+    password_hash = generate_password_hash(password)
+    user_id = models.create_user(email, password_hash, name, role)
+    token = _create_token(user_id)
+    user_data = {"id": user_id, "email": email, "name": name, "role": role}
+    return jsonify(token=token, user=user_data), 201
+
+
+@app.post("/api/auth/login")
+def login_user():
+    payload = request.get_json(force=True) or {}
+    email = str(payload.get("email", "")).strip().lower()
+    password = str(payload.get("password", ""))
+
+    if not email or not password:
+        return jsonify(error="Email and password are required"), 400
+
+    user = models.get_user_by_email(email)
+    if not user or not check_password_hash(user.get("password_hash", ""), password):
+        return jsonify(error="Invalid email or password"), 401
+
+    token = _create_token(user["id"])
+    user_data = {"id": user["id"], "email": user["email"], "name": user["name"], "role": user["role"]}
+    return jsonify(token=token, user=user_data)
+
+
+@app.get("/api/auth/me")
+def get_me():
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    user_data = {"id": user["id"], "email": user["email"], "name": user["name"], "role": user["role"]}
+    return jsonify(user=user_data)
+
+
+# ==========================================
+# Subjects (Faculty) API
+# ==========================================
+
+@app.get("/api/subjects")
+def get_subjects():
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    return jsonify(models.list_subjects_for_faculty(user["id"]))
+
+
+@app.post("/api/subjects")
+def create_subject():
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    payload = request.get_json(force=True) or {}
+    name = str(payload.get("name", "")).strip()
+    if not name:
+        return jsonify(error="Subject name is required"), 400
+    code = str(payload.get("code", "")).strip() or None
+    section = str(payload.get("section", "")).strip() or None
+    capacity = int(payload.get("capacity") or 60)
+    allow_self_registration = bool(payload.get("allow_self_registration", False))
+
+    subject = models.create_subject(
+        faculty_id=user["id"],
+        name=name,
+        code=code,
+        section=section,
+        capacity=capacity,
+        allow_self_registration=allow_self_registration,
+    )
+    return jsonify(subject), 201
+
+
+@app.get("/api/subjects/<int:subject_id>")
+def get_subject_detail(subject_id: int):
+    subject = models.get_subject(subject_id)
+    if not subject:
+        return jsonify(error="Subject not found"), 404
+    return jsonify(subject)
+
+
+@app.put("/api/subjects/<int:subject_id>")
+def update_subject_detail(subject_id: int):
+    payload = request.get_json(force=True) or {}
+    models.update_subject(subject_id, **payload)
+    subject = models.get_subject(subject_id)
+    return jsonify(subject)
+
+
+@app.get("/api/subjects/<int:subject_id>/roster")
+def get_subject_roster(subject_id: int):
+    return jsonify(models.list_enrollments_for_subject(subject_id, status="approved"))
+
+
+@app.get("/api/subjects/<int:subject_id>/enrollments")
+def get_subject_enrollments(subject_id: int):
+    status = request.args.get("status")
+    return jsonify(models.list_enrollments_for_subject(subject_id, status=status))
+
+
+# ==========================================
+# Enrollments API
+# ==========================================
+
+@app.post("/api/enrollments/join")
+def join_class():
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    payload = request.get_json(force=True) or {}
+    join_code = str(payload.get("join_code", "")).strip().upper()
+    if not join_code:
+        return jsonify(error="Join code is required"), 400
+
+    subject = models.get_subject_by_join_code(join_code)
+    if not subject:
+        return jsonify(error="No class found with that code"), 404
+
+    existing = models.get_enrollment_by_student_subject(user["id"], subject["id"])
+    if existing:
+        return jsonify(error=f"You already joined or requested this class (Status: {existing['status']})"), 400
+
+    enrollment = models.create_enrollment(user["id"], subject["id"])
+    if subject.get("allow_self_registration"):
+        models.update_enrollment_status(enrollment["id"], "approved")
+        enrollment["status"] = "approved"
+
+    return jsonify(enrollment), 201
+
+
+@app.get("/api/enrollments/my")
+def get_my_enrollments():
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    return jsonify(models.list_enrollments_for_student(user["id"]))
+
+
+@app.post("/api/enrollments/<int:enrollment_id>/approve")
+def approve_enrollment(enrollment_id: int):
+    models.update_enrollment_status(enrollment_id, "approved")
+    enr = models.get_enrollment(enrollment_id)
+    if enr:
+        models.create_notification(
+            enr["student_user_id"],
+            "Enrollment Approved",
+            "Your request to join class was approved.",
+            "enrollment",
+        )
+    return jsonify(success=True)
+
+
+@app.post("/api/enrollments/<int:enrollment_id>/reject")
+def reject_enrollment(enrollment_id: int):
+    models.update_enrollment_status(enrollment_id, "rejected")
+    enr = models.get_enrollment(enrollment_id)
+    if enr:
+        models.create_notification(
+            enr["student_user_id"],
+            "Enrollment Rejected",
+            "Your request to join class was not approved.",
+            "enrollment",
+        )
+    return jsonify(success=True)
+
+
+# ==========================================
+# Sessions (Faculty) API
+# ==========================================
+
+@app.post("/api/subjects/<int:subject_id>/sessions")
+def create_session(subject_id: int):
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    payload = request.get_json(force=True) or {}
+    method = payload.get("method", "live")
+    session = models.create_attendance_session(subject_id, user["id"], method=method)
+    return jsonify(session), 201
+
+
+@app.get("/api/subjects/<int:subject_id>/sessions")
+def get_subject_sessions(subject_id: int):
+    return jsonify(models.list_sessions_for_subject(subject_id))
+
+
+@app.get("/api/sessions/<int:session_id>")
+def get_session(session_id: int):
+    session = models.get_attendance_session(session_id)
+    if not session:
+        return jsonify(error="Session not found"), 404
+    return jsonify(session)
+
+
+@app.post("/api/sessions/<int:session_id>/mark-frame")
+def mark_session_frame(session_id: int):
+    payload = request.get_json(force=True) or {}
+    image_b64 = payload.get("image")
+    if not image_b64:
+        return jsonify(error="image is required"), 400
+
+    frame = _decode_base64_image(image_b64)
+    if frame is None:
+        return jsonify(error="could not decode image"), 400
+
+    session = models.get_attendance_session(session_id)
+    allowed_ids = models.approved_student_ids_for_subject(session["subject_id"]) if session else None
+    results = process_frame(frame, session_id=session_id, allowed_student_ids=allowed_ids)
+    return jsonify([_face_result_json(r) for r in results])
+
+
+@app.post("/api/sessions/<int:session_id>/mark-group-photo")
+def mark_session_group_photo(session_id: int):
+    payload = request.get_json(force=True) or {}
+    image_b64 = payload.get("image")
+    if not image_b64:
+        return jsonify(error="image is required"), 400
+
+    photo = _decode_base64_image(image_b64)
+    if photo is None:
+        return jsonify(error="could not decode image"), 400
+
+    session = models.get_attendance_session(session_id)
+    allowed_ids = models.approved_student_ids_for_subject(session["subject_id"]) if session else None
+    results = process_frame(photo, session_id=session_id, allowed_student_ids=allowed_ids)
+    recognized = [r for r in results if r.student_id is not None]
+    return jsonify({
+        "faces_detected": len(results),
+        "recognized": len(recognized),
+        "newly_marked": sum(1 for r in recognized if r.attendance_marked),
+        "results": [_face_result_json(r) for r in results],
+    })
+
+
+@app.post("/api/sessions/<int:session_id>/finalize")
+def finalize_session_route(session_id: int):
+    payload = request.get_json(force=True) or {}
+    corrections = payload.get("corrections", [])
+    for c in corrections:
+        student_id = c.get("student_id")
+        status = c.get("status", "Present")
+        if student_id:
+            models.update_attendance_status(student_id, session_id, status, manually_set=True)
+    models.finalize_session(session_id)
+    return jsonify(success=True)
+
+
+@app.get("/api/sessions/<int:session_id>/attendance")
+def get_session_attendance(session_id: int):
+    return jsonify(models.attendance_for_session(session_id))
+
+
+# ==========================================
+# Student API
+# ==========================================
+
+@app.get("/api/student/subjects")
+def get_student_subjects():
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    enrollments = models.list_enrollments_for_student(user["id"])
+    student = models.get_student_by_user_id(user["id"])
+    result = []
+    for e in enrollments:
+        if e.get("status") == "approved":
+            sessions = models.list_sessions_for_subject(e["subject_id"])
+            total_sessions = len(sessions)
+            attended_sessions = 0
+            if student:
+                for s in sessions:
+                    if models.has_marked_attendance_session(student["id"], s["id"]):
+                        attended_sessions += 1
+            result.append({
+                "id": e["subject_id"],
+                "subject_id": e["subject_id"],
+                "name": e["subject_name"],
+                "code": e.get("code") or e.get("subject_code"),
+                "section": e.get("section"),
+                "faculty_name": e.get("faculty_name"),
+                "status": e["status"],
+                "total_sessions": total_sessions,
+                "attended_sessions": attended_sessions,
+            })
+    return jsonify(result)
+
+
+@app.get("/api/student/attendance")
+def get_student_attendance():
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    subject_id_str = request.args.get("subject_id")
+    student = models.get_student_by_user_id(user["id"])
+    if not student:
+        return jsonify([])
+
+    if subject_id_str:
+        try:
+            subject_id = int(subject_id_str)
+            sessions = models.list_sessions_for_subject(subject_id)
+            records = []
+            for s in sessions:
+                att_rows = [a for a in models.attendance_for_session(s["id"]) if a.get("student_id") == student["id"]]
+                att = att_rows[0] if att_rows else None
+                is_present = att is not None and str(att.get("status", "")).lower() == "present"
+                records.append({
+                    "id": s["id"],
+                    "session_id": s["id"],
+                    "session_date": s.get("session_date"),
+                    "time_in": att.get("time_in") if att else None,
+                    "status": "present" if is_present else "absent",
+                    "confidence": round(float(att.get("confidence", 0.0)), 3) if att and att.get("confidence") else 0.0,
+                    "method": s.get("method", "live"),
+                })
+            return jsonify(records)
+        except Exception:
+            return jsonify([])
+    return jsonify([])
+
+
+@app.post("/api/student/register-face")
+def student_register_face():
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    payload = request.get_json(force=True) or {}
+    enrollment_no = payload.get("enrollment_no")
+    name = payload.get("name") or user["name"]
+    images_b64 = payload.get("images", [])
+
+    if not enrollment_no:
+        return jsonify(error="Enrollment number is required"), 400
+    if not images_b64:
+        return jsonify(error="At least one sample image is required"), 400
+
+    try:
+        images = [_decode_base64_image(img) for img in images_b64]
+        student_id = register_student(enrollment_no, name, images)
+        models.link_student_to_user(student_id, user["id"])
+    except NoFaceDetectedError as exc:
+        return jsonify(error=str(exc)), 422
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+
+    return jsonify(id=student_id, enrollment_no=enrollment_no, name=name), 201
+
+
+# ==========================================
+# Notifications API
+# ==========================================
+
+@app.get("/api/notifications")
+def get_notifications_route():
+    user = get_auth_user()
+    if not user:
+        return jsonify([])
+    return jsonify(models.get_notifications(user["id"]))
+
+
+@app.post("/api/notifications/<int:notification_id>/read")
+def mark_notification_read_route(notification_id: int):
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    models.mark_notification_read(notification_id, user["id"])
+    return jsonify(success=True)
+
+
+@app.post("/api/notifications/read-all")
+def mark_all_notifications_read_route():
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    models.mark_all_notifications_read(user["id"])
+    return jsonify(success=True)
+
+
+# ==========================================
+# Legacy API (unauthenticated access preserved)
+# ==========================================
 
 @app.get("/api/students")
 def get_students():
@@ -95,8 +540,6 @@ def mark_attendance_from_frame():
 
 @app.post("/api/attendance/group-photo")
 def mark_attendance_from_group_photo():
-    """Faculty uploads a single group photo; recognize every enrolled student
-    in it and mark their attendance in one shot."""
     payload = request.get_json(force=True)
     image_b64 = payload.get("image")
     if not image_b64:
@@ -118,7 +561,6 @@ def mark_attendance_from_group_photo():
 
 @app.get("/api/attendance")
 def get_attendance():
-    from datetime import date
     date_param = request.args.get("date")
     session_date = date.fromisoformat(date_param) if date_param else date.today()
     return jsonify(models.attendance_for_date(session_date))
@@ -126,7 +568,6 @@ def get_attendance():
 
 @app.get("/api/attendance/export")
 def export_attendance():
-    from datetime import date
     date_param = request.args.get("date")
     fmt = request.args.get("format", "csv")
     session_date = date.fromisoformat(date_param) if date_param else date.today()
@@ -135,8 +576,6 @@ def export_attendance():
         try:
             data = report_service.export_xlsx(session_date)
         except ImportError:
-            # openpyxl/pyexpat unavailable in this Python env — fall back to CSV
-            # rather than 500ing, so the report is still downloadable.
             return jsonify(error="Excel export unavailable in this environment; use CSV export instead."), 503
         return send_file(
             __import__("io").BytesIO(data),
@@ -160,15 +599,10 @@ def create_app() -> Flask:
 
 
 if __name__ == "__main__":
-    # Port 5050, not 5000: macOS's AirPlay Receiver listens on 5000 (IPv6)
-    # and will intercept requests with a 403 before Flask ever sees them.
-    #
-    # use_reloader=False: loading the ArcFace model twice (reloader spawns a
-    # child process) wastes ~600MB RAM and doubles startup time.
     flask_app = create_app()
     try:
         from backend.vision.face_engine import warm_up
-        warm_up()  # load the model now so the first request isn't slow
-    except Exception as exc:  # noqa: BLE001 - don't block startup on model issues
+        warm_up()
+    except Exception as exc:  # noqa: BLE001
         flask_app.logger.warning("Face engine warm-up skipped: %s", exc)
     flask_app.run(debug=True, port=5050, use_reloader=False)

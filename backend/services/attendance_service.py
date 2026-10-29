@@ -30,8 +30,15 @@ class FrameFaceResult:
     attendance_marked: bool
 
 
-def process_frame(image_bgr: np.ndarray) -> list[FrameFaceResult]:
-    known_embeddings = models.all_embeddings()
+def process_frame(
+    image_bgr: np.ndarray,
+    session_id: int | None = None,
+    allowed_student_ids: list[int] | None = None,
+) -> list[FrameFaceResult]:
+    if allowed_student_ids is not None:
+        known_embeddings = models.embeddings_for_students(allowed_student_ids)
+    else:
+        known_embeddings = models.all_embeddings()
     results: list[FrameFaceResult] = []
 
     # Guard against the same student being assigned to two different faces in a
@@ -56,7 +63,7 @@ def process_frame(image_bgr: np.ndarray) -> list[FrameFaceResult]:
         student = models.get_student(match.student_id)
         name = student["name"] if student else "Unknown"
         enrollment_no = student["enrollment_no"] if student else None
-        newly_marked = models.mark_attendance(match.student_id, match.confidence)
+        newly_marked = models.mark_attendance(match.student_id, match.confidence, session_id=session_id)
 
         results.append(
             FrameFaceResult(face, match.student_id, name, enrollment_no, match.confidence, newly_marked)

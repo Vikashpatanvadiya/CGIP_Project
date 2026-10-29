@@ -25,7 +25,10 @@ def supabase_dsn() -> str | None:
     for key in ("Database_connection", "DATABASE_CONNECTION", "DATABASE_URL", "SUPABASE_DB_URL"):
         value = os.environ.get(key)
         if value and value.strip():
-            return value.strip()
+            dsn = value.strip()
+            if "postgres:@" in dsn or "[YOUR-PASSWORD]" in dsn:
+                continue
+            return dsn
     return None
 
 
