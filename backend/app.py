@@ -203,6 +203,17 @@ def update_subject_detail(subject_id: int):
     return jsonify(subject)
 
 
+@app.delete("/api/subjects/<int:subject_id>")
+def delete_subject_detail(subject_id: int):
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    ok = models.delete_subject(subject_id, user["id"])
+    if not ok:
+        return jsonify(error="Subject not found or not yours to delete"), 403
+    return jsonify(success=True)
+
+
 @app.get("/api/subjects/<int:subject_id>/roster")
 def get_subject_roster(subject_id: int):
     return jsonify(models.list_enrollments_for_subject(subject_id, status="approved"))
@@ -587,40 +598,54 @@ def timetable_delete(class_id: int):
     return jsonify(success=True)
 
 
+def _selected_date():
+    """Return the ?date=YYYY-MM-DD query param as a date, or today if absent/bad."""
+    raw = request.args.get("date")
+    if raw:
+        try:
+            return date.fromisoformat(raw)
+        except ValueError:
+            pass
+    return date.today()
+
+
 @app.get("/api/faculty/today")
 def faculty_today():
-    """Today's scheduled classes for the faculty, each with its subject and
-    whether a session has already been held today."""
+    """Scheduled classes for the faculty on the selected date (defaults to
+    today), each with its subject and whether a session was held that date."""
     user = get_auth_user()
     if not user:
         return jsonify(error="Unauthorized"), 401
-    weekday = date.today().weekday()
+    day = _selected_date()
+    weekday = day.weekday()
     classes = models.scheduled_classes_for_day(user["id"], weekday)
     out = []
     for c in classes:
-        session = models.session_for_schedule_today(c["subject_id"]) if c.get("subject_id") else None
+        session = models.session_for_schedule_today(c["subject_id"], day) if c.get("subject_id") else None
         out.append({**c, "session": session})
-    return jsonify(day_name=_WEEKDAYS[weekday], date=date.today().isoformat(), classes=out)
+    return jsonify(day_name=_WEEKDAYS[weekday], date=day.isoformat(), classes=out)
 
 
 @app.get("/api/student/today")
 def student_today():
-    """Today's classes for the student's enrolled subjects, with attendance status."""
+    """Classes for the student's enrolled subjects on the selected date
+    (defaults to today), with attendance status."""
     user = get_auth_user()
     if not user:
         return jsonify(error="Unauthorized"), 401
-    weekday = date.today().weekday()
+    day = _selected_date()
+    weekday = day.weekday()
     student = models.get_student_by_user_id(user["id"])
     classes = models.scheduled_classes_for_student_day(user["id"], weekday)
     out = []
     for c in classes:
-        session = models.session_for_schedule_today(c["subject_id"]) if c.get("subject_id") else None
+        session = models.session_for_schedule_today(c["subject_id"], day) if c.get("subject_id") else None
         attended = False
         if session and student:
             attended = models.has_marked_attendance_session(student["id"], session["id"])
         out.append({**c, "session": session, "attended": attended})
     return jsonify(
-        day_name=_WEEKDAYS[weekday], date=date.today().isoformat(),
+        day_name=_WEEKDAYS[weekday], date=day.isoformat(),
         has_face=bool(student), classes=out,
     )
 

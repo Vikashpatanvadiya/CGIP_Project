@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   approveEnrollment,
+  deleteSubject,
   getPendingEnrollments,
   getSubject,
   getSubjectRoster,
@@ -18,6 +19,21 @@ export default function SubjectDashboard({ subjectId, initialSubject, navigate }
   const [actionLoading, setActionLoading] = useState({})
   const [error, setError] = useState(null)
   const [copied, setCopied] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState(null)
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await deleteSubject(subjectId)
+      navigate('subjects')
+    } catch (err) {
+      setDeleteError(err.message || 'Failed to delete subject')
+      setDeleting(false)
+    }
+  }
 
   const loadData = useCallback(async () => {
     if (!subjectId) return
@@ -94,6 +110,15 @@ export default function SubjectDashboard({ subjectId, initialSubject, navigate }
 
         <div className="flex items-center gap-3">
           <button
+            onClick={() => setConfirmDelete(true)}
+            className="inline-flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-400 transition hover:bg-red-500/20"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            Delete
+          </button>
+          <button
             onClick={() => navigate('start-session', { subjectId, subject })}
             className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-600/25 transition hover:bg-emerald-500 hover:scale-[1.02] active:scale-[0.98]"
           >
@@ -105,6 +130,34 @@ export default function SubjectDashboard({ subjectId, initialSubject, navigate }
           </button>
         </div>
       </div>
+
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setConfirmDelete(false)}>
+          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-white">Delete this subject?</h3>
+            <p className="mt-2 text-sm text-slate-400">
+              This permanently removes <span className="font-semibold text-white">{subject?.name}</span> and
+              all its sessions, attendance records, enrollments, and timetable slots. This cannot be undone.
+            </p>
+            {deleteError && <p className="mt-3 text-sm text-red-400">{deleteError}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-50"
+              >
+                {deleting ? 'Deleting…' : 'Delete subject'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400 flex items-center justify-between">

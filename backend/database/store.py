@@ -59,6 +59,7 @@ get_subject = _backend.get_subject
 get_subject_by_join_code = _backend.get_subject_by_join_code
 list_subjects_for_faculty = _backend.list_subjects_for_faculty
 update_subject = _backend.update_subject
+delete_subject = _backend.delete_subject
 
 # ---------------------------------------------------------------------------
 # Enrollment management

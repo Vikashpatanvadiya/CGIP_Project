@@ -316,6 +316,28 @@ def list_subjects_for_faculty(faculty_id: int) -> list[dict]:
         return result
 
 
+def delete_subject(subject_id: int, faculty_id: int) -> bool:
+    """Delete a subject the faculty owns, plus attendance, sessions,
+    enrollments, and scheduled classes attached to it."""
+    with get_connection() as conn:
+        owns = conn.execute(
+            "SELECT 1 FROM subjects WHERE id = ? AND faculty_id = ?",
+            (subject_id, faculty_id),
+        ).fetchone()
+        if not owns:
+            return False
+        conn.execute(
+            "DELETE FROM attendance WHERE session_id IN "
+            "(SELECT id FROM attendance_sessions WHERE subject_id = ?)",
+            (subject_id,),
+        )
+        conn.execute("DELETE FROM attendance_sessions WHERE subject_id = ?", (subject_id,))
+        conn.execute("DELETE FROM enrollments WHERE subject_id = ?", (subject_id,))
+        conn.execute("DELETE FROM scheduled_classes WHERE subject_id = ?", (subject_id,))
+        conn.execute("DELETE FROM subjects WHERE id = ?", (subject_id,))
+        return True
+
+
 def update_subject(subject_id: int, **kwargs) -> bool:
     allowed = {"name", "code", "section", "capacity", "allow_self_registration"}
     updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}

@@ -106,6 +106,11 @@ export async function getSubjectRoster(id) {
   return res.json()
 }
 
+export async function deleteSubject(id) {
+  const res = await request(`/subjects/${id}`, { method: 'DELETE' })
+  return res.json()
+}
+
 // ==========================================
 // Enrollments API
 // ==========================================
@@ -255,13 +260,15 @@ export async function deleteScheduledClass(id) {
   return res.json()
 }
 
-export async function getFacultyToday() {
-  const res = await request('/faculty/today')
+export async function getFacultyToday(date) {
+  const q = date ? `?date=${date}` : ''
+  const res = await request(`/faculty/today${q}`)
   return res.json()
 }
 
-export async function getStudentToday() {
-  const res = await request('/student/today')
+export async function getStudentToday(date) {
+  const q = date ? `?date=${date}` : ''
+  const res = await request(`/student/today${q}`)
   return res.json()
 }
 

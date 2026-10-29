@@ -25,35 +25,43 @@ function toMinutes(t) {
   return h * 60 + m
 }
 
+function todayStr() {
+  return new Date().toISOString().slice(0, 10)
+}
+
 export default function FacultyToday({ navigate }) {
   const [data, setData] = useState(null)
+  const [selectedDate, setSelectedDate] = useState(todayStr())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  const load = async () => {
+  const load = async (date) => {
     setLoading(true)
     setError(null)
     try {
-      setData(await getFacultyToday())
+      setData(await getFacultyToday(date))
     } catch (err) {
-      setError(err.message || 'Failed to load today\'s classes')
+      setError(err.message || 'Failed to load classes')
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    load()
-  }, [])
+    load(selectedDate)
+  }, [selectedDate])
+
+  const isToday = selectedDate === todayStr()
 
   const classes = data?.classes || []
   const now = minutesNow()
 
   const statusOf = (c) => {
-    const start = toMinutes(c.start_time)
-    const end = toMinutes(c.end_time) ?? (start != null ? start + 60 : null)
     if (c.session && c.session.status === 'finalized') return 'done'
     if (c.session && c.session.status === 'active') return 'active'
+    if (!isToday) return 'scheduled'
+    const start = toMinutes(c.start_time)
+    const end = toMinutes(c.end_time) ?? (start != null ? start + 60 : null)
     if (start != null && end != null && now >= start && now <= end) return 'now'
     if (start != null && now < start) return 'upcoming'
     return 'past'
@@ -85,13 +93,29 @@ export default function FacultyToday({ navigate }) {
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-sm font-medium text-indigo-400">{data?.day_name || 'Today'}</p>
-          <h2 className="text-2xl font-bold tracking-tight text-white">Today's Classes</h2>
+          <p className="text-sm font-medium text-indigo-400">{data?.day_name || 'Schedule'}</p>
+          <h2 className="text-2xl font-bold tracking-tight text-white">
+            {isToday ? "Today's Classes" : `Classes · ${data?.day_name || ''}`}
+          </h2>
           <p className="mt-1 text-sm text-slate-400">
             {data?.date} · {classes.length} class{classes.length === 1 ? '' : 'es'} scheduled
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(e.target.value || todayStr())}
+            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200"
+          />
+          {!isToday && (
+            <button
+              onClick={() => setSelectedDate(todayStr())}
+              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-700"
+            >
+              Today
+            </button>
+          )}
           <button
             onClick={() => navigate('timetable-import')}
             className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-700"
@@ -113,7 +137,7 @@ export default function FacultyToday({ navigate }) {
       {error && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400 flex items-center justify-between">
           <span>{error}</span>
-          <button onClick={load} className="rounded bg-red-500/20 px-3 py-1 text-xs font-semibold text-red-300 hover:bg-red-500/30">Retry</button>
+          <button onClick={() => load(selectedDate)} className="rounded bg-red-500/20 px-3 py-1 text-xs font-semibold text-red-300 hover:bg-red-500/30">Retry</button>
         </div>
       )}
 
@@ -133,7 +157,9 @@ export default function FacultyToday({ navigate }) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold text-white">No classes scheduled today</h3>
+          <h3 className="text-lg font-semibold text-white">
+            {isToday ? 'No classes scheduled today' : 'No classes on this day'}
+          </h3>
           <p className="mt-1 text-sm text-slate-400 max-w-sm mx-auto">
             Import your timetable once and your classes will appear here automatically every day.
           </p>
@@ -157,6 +183,7 @@ export default function FacultyToday({ navigate }) {
               done: { label: 'Attendance taken', cls: 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30' },
               upcoming: { label: 'Upcoming', cls: 'bg-slate-600/20 text-slate-400 border-slate-600/40' },
               past: { label: 'Ended', cls: 'bg-slate-700/30 text-slate-500 border-slate-700/50' },
+              scheduled: { label: 'Scheduled', cls: 'bg-slate-600/20 text-slate-400 border-slate-600/40' },
             }[status]
 
             return (
@@ -204,6 +231,8 @@ export default function FacultyToday({ navigate }) {
                     >
                       Continue
                     </button>
+                  ) : status === 'scheduled' ? (
+                    <span className="text-xs text-slate-500">Not today</span>
                   ) : (
                     <button
                       onClick={() => startAttendance(c)}

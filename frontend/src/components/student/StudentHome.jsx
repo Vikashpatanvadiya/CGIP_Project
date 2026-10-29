@@ -151,7 +151,7 @@ export default function StudentHome({ user, navigate }) {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-bold text-white">Today · {today.day_name}</h3>
-            <span className="text-xs text-slate-400">{today.date}</span>
+            <span className="text-xs text-slate-400">{today.date} · live now</span>
           </div>
           <div className="space-y-2">
             {today.classes.map((c) => {
