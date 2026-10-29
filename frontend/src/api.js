@@ -218,6 +218,46 @@ export async function registerStudentFace({ enrollment_no, name, images }) {
 }
 
 // ==========================================
+// Timetable API
+// ==========================================
+
+export async function parseTimetable(text) {
+  const res = await request('/timetable/parse', {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  })
+  return res.json()
+}
+
+export async function importTimetable(classes) {
+  const res = await request('/timetable/import', {
+    method: 'POST',
+    body: JSON.stringify({ classes }),
+  })
+  return res.json()
+}
+
+export async function getTimetable() {
+  const res = await request('/timetable')
+  return res.json()
+}
+
+export async function deleteScheduledClass(id) {
+  const res = await request(`/timetable/${id}`, { method: 'DELETE' })
+  return res.json()
+}
+
+export async function getFacultyToday() {
+  const res = await request('/faculty/today')
+  return res.json()
+}
+
+export async function getStudentToday() {
+  const res = await request('/student/today')
+  return res.json()
+}
+
+// ==========================================
 // Notifications API
 // ==========================================
 

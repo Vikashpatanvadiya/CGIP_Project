@@ -87,3 +87,14 @@ get_notifications = _backend.get_notifications
 mark_notification_read = _backend.mark_notification_read
 mark_all_notifications_read = _backend.mark_all_notifications_read
 notification_exists = _backend.notification_exists
+
+# ---------------------------------------------------------------------------
+# Timetable / scheduled classes
+# ---------------------------------------------------------------------------
+get_or_create_subject_by_code = _backend.get_or_create_subject_by_code
+create_scheduled_class = _backend.create_scheduled_class
+list_scheduled_classes = _backend.list_scheduled_classes
+scheduled_classes_for_day = _backend.scheduled_classes_for_day
+scheduled_classes_for_student_day = _backend.scheduled_classes_for_student_day
+delete_scheduled_class = _backend.delete_scheduled_class
+session_for_schedule_today = _backend.session_for_schedule_today

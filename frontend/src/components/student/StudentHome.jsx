@@ -1,8 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
-import { getNotifications, getStudentSubjects } from '../../api'
+import { getNotifications, getStudentSubjects, getStudentToday } from '../../api'
+
+function to12h(t) {
+  if (!t) return ''
+  const [h, m] = t.split(':')
+  const hour = Number(h)
+  const ampm = hour >= 12 ? 'PM' : 'AM'
+  const h12 = hour % 12 === 0 ? 12 : hour % 12
+  return `${h12}:${m} ${ampm}`
+}
 
 export default function StudentHome({ user, navigate }) {
   const [subjects, setSubjects] = useState([])
+  const [today, setToday] = useState(null)
   const [unreadCount, setUnreadCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -11,12 +21,14 @@ export default function StudentHome({ user, navigate }) {
     setLoading(true)
     setError(null)
     try {
-      const [subjectsData, notifData] = await Promise.all([
+      const [subjectsData, notifData, todayData] = await Promise.all([
         getStudentSubjects().catch(() => []),
         getNotifications().catch(() => []),
+        getStudentToday().catch(() => null),
       ])
 
       setSubjects(subjectsData || [])
+      setToday(todayData)
       const unread = (notifData || []).filter((n) => !n.is_read).length
       setUnreadCount(unread)
     } catch (err) {
@@ -131,6 +143,53 @@ export default function StudentHome({ user, navigate }) {
           <button onClick={loadDashboard} className="rounded bg-red-500/20 px-3 py-1 text-xs font-semibold">
             Retry
           </button>
+        </div>
+      )}
+
+      {/* Today's Classes */}
+      {today && (today.classes || []).length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold text-white">Today · {today.day_name}</h3>
+            <span className="text-xs text-slate-400">{today.date}</span>
+          </div>
+          <div className="space-y-2">
+            {today.classes.map((c) => {
+              let label, cls
+              if (c.attended) {
+                label = 'Present ✓'; cls = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+              } else if (c.session && c.session.status === 'active') {
+                label = 'Attendance open'; cls = 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+              } else if (c.session && c.session.status === 'finalized') {
+                label = 'Absent'; cls = 'bg-red-500/10 text-red-400 border-red-500/30'
+              } else {
+                label = 'Not started'; cls = 'bg-slate-600/20 text-slate-400 border-slate-600/40'
+              }
+              return (
+                <div key={c.id} className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-800/60 p-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-20 shrink-0 text-xs">
+                      <div className="font-semibold text-white">{to12h(c.start_time)}</div>
+                      <div className="text-slate-500">{to12h(c.end_time)}</div>
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="rounded bg-indigo-500/10 px-2 py-0.5 text-xs font-bold text-indigo-400">{c.course_code || 'CLASS'}</span>
+                        <span className="text-sm font-semibold text-white">{c.course_name}</span>
+                      </div>
+                      <p className="text-xs text-slate-400">{c.room || ''}{c.section ? ` · Sec ${c.section}` : ''}</p>
+                    </div>
+                  </div>
+                  <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${cls}`}>{label}</span>
+                </div>
+              )
+            })}
+          </div>
+          {!today.has_face && (
+            <p className="text-xs text-amber-400">
+              Register your Face ID so you can be marked present when faculty takes attendance.
+            </p>
+          )}
         </div>
       )}
 

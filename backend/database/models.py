@@ -532,6 +532,113 @@ def notification_exists(user_id: int, related_session_id: int, notification_type
 
 
 # ---------------------------------------------------------------------------
+# Timetable / scheduled classes
+# ---------------------------------------------------------------------------
+
+def get_or_create_subject_by_code(faculty_id: int, code: str | None, name: str,
+                                  section: str | None = None) -> dict:
+    with get_connection() as conn:
+        if code:
+            row = conn.execute(
+                "SELECT id FROM subjects WHERE faculty_id = ? AND code = ? AND IFNULL(section,'') = IFNULL(?,'')",
+                (faculty_id, code, section),
+            ).fetchone()
+            if row:
+                existing = get_subject(row["id"])
+                if existing:
+                    return existing
+    return create_subject(faculty_id, name=name, code=code, section=section)
+
+
+def create_scheduled_class(faculty_id: int, subject_id: int | None, course_code: str | None,
+                           course_name: str | None, section: str | None, day_of_week: int,
+                           start_time: str, end_time: str | None, room: str | None,
+                           faculty_name: str | None) -> bool:
+    with get_connection() as conn:
+        try:
+            conn.execute(
+                """INSERT INTO scheduled_classes
+                   (faculty_id, subject_id, course_code, course_name, section, day_of_week,
+                    start_time, end_time, room, faculty_name)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (faculty_id, subject_id, course_code, course_name, section, day_of_week,
+                 start_time, end_time, room, faculty_name),
+            )
+            return True
+        except Exception:
+            return False  # UNIQUE violation -> slot already exists
+
+
+def _scheduled_row(row) -> dict:
+    return {
+        "id": row["id"], "faculty_id": row["faculty_id"], "subject_id": row["subject_id"],
+        "course_code": row["course_code"], "course_name": row["course_name"],
+        "section": row["section"], "day_of_week": row["day_of_week"],
+        "start_time": row["start_time"], "end_time": row["end_time"],
+        "room": row["room"], "faculty_name": row["faculty_name"],
+    }
+
+
+def list_scheduled_classes(faculty_id: int) -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM scheduled_classes WHERE faculty_id = ? ORDER BY day_of_week, start_time",
+            (faculty_id,),
+        ).fetchall()
+        return [_scheduled_row(r) for r in rows]
+
+
+def scheduled_classes_for_day(faculty_id: int, day_of_week: int) -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM scheduled_classes WHERE faculty_id = ? AND day_of_week = ? ORDER BY start_time",
+            (faculty_id, day_of_week),
+        ).fetchall()
+        return [_scheduled_row(r) for r in rows]
+
+
+def scheduled_classes_for_student_day(user_id: int, day_of_week: int) -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT * FROM scheduled_classes sc
+               WHERE sc.day_of_week = ? AND sc.subject_id IN (
+                   SELECT e.subject_id FROM enrollments e
+                   WHERE e.student_user_id = ? AND e.status = 'approved'
+               ) ORDER BY sc.start_time""",
+            (day_of_week, user_id),
+        ).fetchall()
+        return [_scheduled_row(r) for r in rows]
+
+
+def delete_scheduled_class(class_id: int, faculty_id: int) -> bool:
+    with get_connection() as conn:
+        cur = conn.execute(
+            "DELETE FROM scheduled_classes WHERE id = ? AND faculty_id = ?",
+            (class_id, faculty_id),
+        )
+        return cur.rowcount > 0
+
+
+def session_for_schedule_today(subject_id: int, session_date=None) -> dict | None:
+    from datetime import date as _date
+    session_date = session_date or _date.today()
+    sd = session_date.isoformat() if hasattr(session_date, "isoformat") else session_date
+    with get_connection() as conn:
+        row = conn.execute(
+            """SELECT s.id, s.status, s.method, s.start_time,
+               (SELECT COUNT(*) FROM attendance a WHERE a.session_id = s.id AND a.status = 'Present') as present_count
+               FROM attendance_sessions s
+               WHERE s.subject_id = ? AND s.session_date = ?
+               ORDER BY s.start_time DESC LIMIT 1""",
+            (subject_id, sd),
+        ).fetchone()
+        if not row:
+            return None
+        return {"id": row["id"], "status": row["status"], "method": row["method"],
+                "start_time": row["start_time"], "present_count": row["present_count"]}
+
+
+# ---------------------------------------------------------------------------
 # Database initialization
 # ---------------------------------------------------------------------------
 

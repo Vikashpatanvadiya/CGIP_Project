@@ -208,4 +208,20 @@ def init_db() -> None:
                 manually_set INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(student_id, session_date, session_id)
             );
+
+            CREATE TABLE IF NOT EXISTS scheduled_classes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                faculty_id INTEGER NOT NULL REFERENCES users(id),
+                subject_id INTEGER REFERENCES subjects(id),
+                course_code TEXT,
+                course_name TEXT,
+                section TEXT,
+                day_of_week INTEGER NOT NULL,
+                start_time TEXT NOT NULL,
+                end_time TEXT,
+                room TEXT,
+                faculty_name TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(faculty_id, course_code, section, day_of_week, start_time)
+            );
         """)

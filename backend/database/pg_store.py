@@ -105,6 +105,22 @@ CREATE TABLE IF NOT EXISTS notifications (
     is_read BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS scheduled_classes (
+    id SERIAL PRIMARY KEY,
+    faculty_id INTEGER NOT NULL REFERENCES users(id),
+    subject_id INTEGER REFERENCES subjects(id),
+    course_code TEXT,
+    course_name TEXT,
+    section TEXT,
+    day_of_week INTEGER NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME,
+    room TEXT,
+    faculty_name TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(faculty_id, course_code, section, day_of_week, start_time)
+);
 """
 
 _pool: ConnectionPool | None = None
@@ -731,3 +747,117 @@ def notification_exists(user_id: int, related_session_id: int, notification_type
             (user_id, related_session_id, notification_type),
         ).fetchone()
         return r is not None
+
+
+# ---------------------------------------------------------------------------
+# Timetable / scheduled classes
+# ---------------------------------------------------------------------------
+
+def get_or_create_subject_by_code(faculty_id: int, code: str | None, name: str,
+                                  section: str | None = None) -> dict:
+    """Find this faculty's subject by (code, section), else create it."""
+    with _get_pool().connection() as conn:
+        if code:
+            r = conn.execute(
+                "SELECT id FROM subjects WHERE faculty_id = %s AND code = %s AND COALESCE(section,'') = COALESCE(%s,'')",
+                (faculty_id, code, section),
+            ).fetchone()
+            if r:
+                existing = get_subject(r[0])
+                if existing:
+                    return existing
+    return create_subject(faculty_id, name=name, code=code, section=section)
+
+
+def create_scheduled_class(faculty_id: int, subject_id: int | None, course_code: str | None,
+                           course_name: str | None, section: str | None, day_of_week: int,
+                           start_time: str, end_time: str | None, room: str | None,
+                           faculty_name: str | None) -> bool:
+    """Insert a weekly class slot; ignore if an identical slot already exists."""
+    with _get_pool().connection() as conn:
+        cur = conn.execute(
+            """INSERT INTO scheduled_classes
+               (faculty_id, subject_id, course_code, course_name, section, day_of_week,
+                start_time, end_time, room, faculty_name)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (faculty_id, course_code, section, day_of_week, start_time) DO NOTHING""",
+            (faculty_id, subject_id, course_code, course_name, section, day_of_week,
+             start_time, end_time, room, faculty_name),
+        )
+        return cur.rowcount > 0
+
+
+def _scheduled_row(r: tuple) -> dict:
+    return {
+        "id": r[0], "faculty_id": r[1], "subject_id": r[2], "course_code": r[3],
+        "course_name": r[4], "section": r[5], "day_of_week": r[6],
+        "start_time": str(r[7]), "end_time": str(r[8]) if r[8] else None,
+        "room": r[9], "faculty_name": r[10],
+    }
+
+
+_SCHEDULED_COLS = ("id, faculty_id, subject_id, course_code, course_name, section, "
+                   "day_of_week, start_time, end_time, room, faculty_name")
+
+
+def list_scheduled_classes(faculty_id: int) -> list[dict]:
+    with _get_pool().connection() as conn:
+        rows = conn.execute(
+            f"SELECT {_SCHEDULED_COLS} FROM scheduled_classes WHERE faculty_id = %s "
+            "ORDER BY day_of_week, start_time",
+            (faculty_id,),
+        ).fetchall()
+        return [_scheduled_row(r) for r in rows]
+
+
+def scheduled_classes_for_day(faculty_id: int, day_of_week: int) -> list[dict]:
+    with _get_pool().connection() as conn:
+        rows = conn.execute(
+            f"SELECT {_SCHEDULED_COLS} FROM scheduled_classes "
+            "WHERE faculty_id = %s AND day_of_week = %s ORDER BY start_time",
+            (faculty_id, day_of_week),
+        ).fetchall()
+        return [_scheduled_row(r) for r in rows]
+
+
+def scheduled_classes_for_student_day(user_id: int, day_of_week: int) -> list[dict]:
+    """Today's timetable slots for subjects the student is approved-enrolled in."""
+    with _get_pool().connection() as conn:
+        rows = conn.execute(
+            f"""SELECT {_SCHEDULED_COLS} FROM scheduled_classes sc
+                WHERE sc.day_of_week = %s AND sc.subject_id IN (
+                    SELECT e.subject_id FROM enrollments e
+                    WHERE e.student_user_id = %s AND e.status = 'approved'
+                )
+                ORDER BY sc.start_time""",
+            (day_of_week, user_id),
+        ).fetchall()
+        return [_scheduled_row(r) for r in rows]
+
+
+def delete_scheduled_class(class_id: int, faculty_id: int) -> bool:
+    with _get_pool().connection() as conn:
+        cur = conn.execute(
+            "DELETE FROM scheduled_classes WHERE id = %s AND faculty_id = %s",
+            (class_id, faculty_id),
+        )
+        return cur.rowcount > 0
+
+
+def session_for_schedule_today(subject_id: int, session_date: date | None = None) -> dict | None:
+    """The most recent session held for a subject on a given date (to show
+    whether today's scheduled class has already had attendance taken)."""
+    session_date = session_date or date.today()
+    with _get_pool().connection() as conn:
+        r = conn.execute(
+            """SELECT s.id, s.status, s.method, s.start_time,
+               (SELECT COUNT(*) FROM attendance a WHERE a.session_id = s.id AND a.status = 'Present') as present_count
+               FROM attendance_sessions s
+               WHERE s.subject_id = %s AND s.session_date = %s
+               ORDER BY s.start_time DESC LIMIT 1""",
+            (subject_id, session_date),
+        ).fetchone()
+        if not r:
+            return None
+        return {"id": r[0], "status": r[1], "method": r[2],
+                "start_time": str(r[3]), "present_count": r[4]}

@@ -27,6 +27,7 @@ from backend.database import store as models
 from backend.services import report_service
 from backend.services.attendance_service import process_frame
 from backend.services.enrollment_service import NoFaceDetectedError, register_student
+from backend.services.timetable_service import parse_timetable_text
 
 app = Flask(__name__)
 CORS(app)
@@ -458,6 +459,122 @@ def student_register_face():
         return jsonify(error=str(exc)), 400
 
     return jsonify(id=student_id, enrollment_no=enrollment_no, name=name), 201
+
+
+# ==========================================
+# Timetable API
+# ==========================================
+
+_WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+@app.post("/api/timetable/parse")
+def timetable_parse():
+    """Parse pasted timetable text and return a preview (nothing is saved)."""
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    payload = request.get_json(force=True) or {}
+    text = str(payload.get("text", ""))
+    if not text.strip():
+        return jsonify(error="Paste your timetable text first"), 400
+    return jsonify(classes=parse_timetable_text(text))
+
+
+@app.post("/api/timetable/import")
+def timetable_import():
+    """Create subjects + weekly scheduled classes from the selected slots."""
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    payload = request.get_json(force=True) or {}
+    classes = payload.get("classes", [])
+    if not classes:
+        return jsonify(error="No classes to import"), 400
+
+    imported = 0
+    subjects_created = {}
+    for c in classes:
+        day = c.get("day_of_week")
+        start = c.get("start_time")
+        if day is None or not start:
+            continue  # a slot with no day/time can't be scheduled
+
+        code = (c.get("course_code") or "").strip() or None
+        name = (c.get("course_name") or code or "Untitled Class").strip()
+        section = (c.get("section") or "").strip() or None
+
+        subj_key = (code, section)
+        if subj_key in subjects_created:
+            subject = subjects_created[subj_key]
+        else:
+            subject = models.get_or_create_subject_by_code(user["id"], code, name, section)
+            subjects_created[subj_key] = subject
+
+        if models.create_scheduled_class(
+            faculty_id=user["id"], subject_id=subject["id"], course_code=code,
+            course_name=name, section=section, day_of_week=int(day),
+            start_time=start, end_time=c.get("end_time"),
+            room=c.get("room"), faculty_name=c.get("faculty_name"),
+        ):
+            imported += 1
+
+    return jsonify(imported=imported, subjects=len(subjects_created)), 201
+
+
+@app.get("/api/timetable")
+def timetable_list():
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    return jsonify(models.list_scheduled_classes(user["id"]))
+
+
+@app.delete("/api/timetable/<int:class_id>")
+def timetable_delete(class_id: int):
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    models.delete_scheduled_class(class_id, user["id"])
+    return jsonify(success=True)
+
+
+@app.get("/api/faculty/today")
+def faculty_today():
+    """Today's scheduled classes for the faculty, each with its subject and
+    whether a session has already been held today."""
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    weekday = date.today().weekday()
+    classes = models.scheduled_classes_for_day(user["id"], weekday)
+    out = []
+    for c in classes:
+        session = models.session_for_schedule_today(c["subject_id"]) if c.get("subject_id") else None
+        out.append({**c, "session": session})
+    return jsonify(day_name=_WEEKDAYS[weekday], date=date.today().isoformat(), classes=out)
+
+
+@app.get("/api/student/today")
+def student_today():
+    """Today's classes for the student's enrolled subjects, with attendance status."""
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    weekday = date.today().weekday()
+    student = models.get_student_by_user_id(user["id"])
+    classes = models.scheduled_classes_for_student_day(user["id"], weekday)
+    out = []
+    for c in classes:
+        session = models.session_for_schedule_today(c["subject_id"]) if c.get("subject_id") else None
+        attended = False
+        if session and student:
+            attended = models.has_marked_attendance_session(student["id"], session["id"])
+        out.append({**c, "session": session, "attended": attended})
+    return jsonify(
+        day_name=_WEEKDAYS[weekday], date=date.today().isoformat(),
+        has_face=bool(student), classes=out,
+    )
 
 
 # ==========================================

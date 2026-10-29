@@ -11,12 +11,14 @@ import RegisterPage from './components/auth/RegisterPage'
 // Faculty components
 import AttendanceHistory from './components/faculty/AttendanceHistory'
 import CreateSubject from './components/faculty/CreateSubject'
+import FacultyToday from './components/faculty/FacultyToday'
 import GroupPhotoSession from './components/faculty/GroupPhotoSession'
 import LiveSession from './components/faculty/LiveSession'
 import SessionReview from './components/faculty/SessionReview'
 import StartSession from './components/faculty/StartSession'
 import SubjectDashboard from './components/faculty/SubjectDashboard'
 import SubjectList from './components/faculty/SubjectList'
+import TimetableImport from './components/faculty/TimetableImport'
 
 // Student components
 import FaceRegistration from './components/student/FaceRegistration'
@@ -51,7 +53,7 @@ export default function App() {
         const me = await getMe()
         if (me && me.id) {
           setUser(me)
-          setPage(me.role === 'faculty' ? 'subjects' : 'student-home')
+          setPage(me.role === 'faculty' ? 'faculty-today' : 'student-home')
         } else {
           clearToken()
           setUser(null)
@@ -72,7 +74,7 @@ export default function App() {
   const handleLoginSuccess = (authenticatedUser) => {
     setUser(authenticatedUser)
     if (authenticatedUser.role === 'faculty') {
-      navigate('subjects')
+      navigate('faculty-today')
     } else {
       navigate('student-home')
     }
@@ -172,6 +174,16 @@ export default function App() {
               {user.role === 'faculty' ? (
                 <>
                   <button
+                    onClick={() => navigate('faculty-today')}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                      page === 'faculty-today'
+                        ? 'bg-slate-800 text-white'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Today
+                  </button>
+                  <button
                     onClick={() => navigate('subjects')}
                     className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                       page === 'subjects' || page === 'subject-dashboard'
@@ -180,6 +192,16 @@ export default function App() {
                     }`}
                   >
                     My Subjects
+                  </button>
+                  <button
+                    onClick={() => navigate('timetable-import')}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                      page === 'timetable-import'
+                        ? 'bg-slate-800 text-white'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Timetable
                   </button>
                   <button
                     onClick={() => navigate('create-subject')}
@@ -267,8 +289,14 @@ export default function App() {
         {/* Faculty Router */}
         {user.role === 'faculty' && (
           <>
-            {(page === 'subjects' || page === 'faculty-home') && (
+            {(page === 'faculty-today' || page === 'faculty-home') && (
+              <FacultyToday navigate={navigate} />
+            )}
+            {page === 'subjects' && (
               <SubjectList navigate={navigate} />
+            )}
+            {page === 'timetable-import' && (
+              <TimetableImport navigate={navigate} />
             )}
             {page === 'create-subject' && (
               <CreateSubject navigate={navigate} />
