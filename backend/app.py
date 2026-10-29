@@ -27,6 +27,7 @@ from backend.database import store as models
 from backend.services import report_service
 from backend.services.attendance_service import process_frame
 from backend.services.enrollment_service import NoFaceDetectedError, register_student
+from backend.services.self_mark_service import SelfMarkError, self_mark
 from backend.services.timetable_service import parse_timetable_text
 
 app = Flask(__name__)
@@ -290,7 +291,16 @@ def create_session(subject_id: int):
         return jsonify(error="Unauthorized"), 401
     payload = request.get_json(force=True) or {}
     method = payload.get("method", "live")
-    session = models.create_attendance_session(subject_id, user["id"], method=method)
+    duration_minutes = payload.get("duration_minutes")
+    try:
+        duration_minutes = int(duration_minutes) if duration_minutes else None
+    except (TypeError, ValueError):
+        duration_minutes = None
+    allow_self_mark = bool(payload.get("allow_self_mark", True))
+    session = models.create_attendance_session(
+        subject_id, user["id"], method=method,
+        duration_minutes=duration_minutes, allow_self_mark=allow_self_mark,
+    )
     return jsonify(session), 201
 
 
@@ -345,6 +355,44 @@ def mark_session_group_photo(session_id: int):
         "newly_marked": sum(1 for r in recognized if r.attendance_marked),
         "results": [_face_result_json(r) for r in results],
     })
+
+
+@app.post("/api/sessions/<int:session_id>/self-mark")
+def session_self_mark(session_id: int):
+    """A student marks their own attendance during an open session window.
+    Requires head-turn liveness + a match to their registered face."""
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    if user.get("role") != "student":
+        return jsonify(error="Only students can self check-in"), 403
+
+    session = models.get_attendance_session(session_id)
+    if not session:
+        return jsonify(error="Session not found"), 404
+    if not session.get("is_open"):
+        return jsonify(error="This attendance session is closed.", code="closed"), 403
+    if not session.get("allow_self_mark", True):
+        return jsonify(error="Self check-in is not enabled for this session.", code="disabled"), 403
+
+    # Must be an approved student of this subject.
+    approved_ids = models.approved_student_ids_for_subject(session["subject_id"])
+    student = models.get_student_by_user_id(user["id"])
+    if not student:
+        return jsonify(error="Register your Face ID first, then try again.", code="no_face"), 422
+    if student["id"] not in approved_ids:
+        return jsonify(error="You are not enrolled in this class.", code="not_enrolled"), 403
+
+    payload = request.get_json(force=True) or {}
+    images_b64 = payload.get("images", [])
+    frames = [img for img in (_decode_base64_image(i) for i in images_b64) if img is not None]
+
+    try:
+        result = self_mark(student, session, frames)
+    except SelfMarkError as exc:
+        return jsonify(error=str(exc), code=exc.code), 422
+
+    return jsonify(result)
 
 
 @app.post("/api/sessions/<int:session_id>/finalize")

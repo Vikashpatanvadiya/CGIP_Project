@@ -155,13 +155,16 @@ export default function StudentHome({ user, navigate }) {
           </div>
           <div className="space-y-2">
             {today.classes.map((c) => {
+              const canSelfMark = c.session && c.session.is_open && c.session.allow_self_mark && !c.attended
               let label, cls
               if (c.attended) {
                 label = 'Present ✓'; cls = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-              } else if (c.session && c.session.status === 'active') {
-                label = 'Attendance open'; cls = 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+              } else if (c.session && c.session.is_open) {
+                label = 'Check-in open'; cls = 'bg-amber-500/10 text-amber-400 border-amber-500/30'
               } else if (c.session && c.session.status === 'finalized') {
                 label = 'Absent'; cls = 'bg-red-500/10 text-red-400 border-red-500/30'
+              } else if (c.session) {
+                label = 'Closed'; cls = 'bg-slate-600/20 text-slate-400 border-slate-600/40'
               } else {
                 label = 'Not started'; cls = 'bg-slate-600/20 text-slate-400 border-slate-600/40'
               }
@@ -180,7 +183,20 @@ export default function StudentHome({ user, navigate }) {
                       <p className="text-xs text-slate-400">{c.room || ''}{c.section ? ` · Sec ${c.section}` : ''}</p>
                     </div>
                   </div>
-                  <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${cls}`}>{label}</span>
+                  <div className="flex items-center gap-2">
+                    {canSelfMark && (
+                      <button
+                        onClick={() => {
+                          if (!today.has_face) { navigate('face-registration'); return }
+                          navigate('student-self-mark', { sessionId: c.session.id, classInfo: c })
+                        }}
+                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
+                      >
+                        {today.has_face ? 'Give Attendance' : 'Register Face'}
+                      </button>
+                    )}
+                    <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${cls}`}>{label}</span>
+                  </div>
                 </div>
               )
             })}

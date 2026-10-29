@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { createSession } from '../../api'
 
 export default function StartSession({ subjectId, subject, navigate }) {
-  const [method, setMethod] = useState('live') // 'live' or 'group_photo'
+  const [method, setMethod] = useState('self_mark') // 'self_mark' | 'live' | 'group_photo'
+  const [duration, setDuration] = useState(5) // minutes students can self check-in
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
@@ -22,8 +23,15 @@ export default function StartSession({ subjectId, subject, navigate }) {
     setError(null)
 
     try {
-      const session = await createSession(subjectId, { method })
-      if (method === 'live') {
+      const opts = { method }
+      if (method === 'self_mark') {
+        opts.duration_minutes = duration
+        opts.allow_self_mark = true
+      }
+      const session = await createSession(subjectId, opts)
+      if (method === 'self_mark') {
+        navigate('self-mark-monitor', { sessionId: session.id, session, subjectId, subject })
+      } else if (method === 'live') {
         navigate('live-session', { sessionId: session.id, session, subjectId, subject })
       } else {
         navigate('group-photo-session', { sessionId: session.id, session, subjectId, subject })
@@ -92,7 +100,33 @@ export default function StartSession({ subjectId, subject, navigate }) {
             Select Recognition Method
           </label>
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-3">
+            {/* Student Self Check-in Option */}
+            <div
+              onClick={() => setMethod('self_mark')}
+              className={`cursor-pointer rounded-xl border p-5 transition-all duration-200 ${
+                method === 'self_mark'
+                  ? 'border-indigo-500 bg-indigo-950/20 shadow-lg ring-1 ring-indigo-500'
+                  : 'border-slate-700 bg-slate-800/40 hover:border-slate-600 hover:bg-slate-800/70'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${method === 'self_mark' ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                </div>
+                <div className={`h-4 w-4 rounded-full border flex items-center justify-center ${method === 'self_mark' ? 'border-indigo-500 bg-indigo-600' : 'border-slate-600'}`}>
+                  {method === 'self_mark' && <span className="h-1.5 w-1.5 rounded-full bg-white"></span>}
+                </div>
+              </div>
+              <h4 className="font-bold text-white">Student Self Check-in</h4>
+              <p className="mt-1 text-xs text-slate-400 leading-relaxed">
+                Open a timed window; enrolled students mark themselves on their own phone with a live
+                anti-spoofing check.
+              </p>
+            </div>
+
             {/* Live Camera Option */}
             <div
               onClick={() => setMethod('live')}
@@ -163,6 +197,32 @@ export default function StartSession({ subjectId, subject, navigate }) {
           </div>
         </div>
 
+        {/* Duration selector for self check-in */}
+        {method === 'self_mark' && (
+          <div className="mt-6 rounded-xl border border-slate-800 bg-slate-800/40 p-4">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-2">
+              Check-in window
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {[2, 5, 10, 15].map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setDuration(m)}
+                  className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                    duration === m ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  {m} min
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              Students can check in for {duration} minutes after you start. After that the window closes.
+            </p>
+          </div>
+        )}
+
         <div className="mt-8 border-t border-slate-800 pt-6">
           <button
             onClick={handleBegin}
@@ -178,7 +238,13 @@ export default function StartSession({ subjectId, subject, navigate }) {
                 <span>Creating Session...</span>
               </>
             ) : (
-              <span>Begin Session ({method === 'live' ? 'Launch Camera' : 'Proceed to Upload'})</span>
+              <span>
+                {method === 'self_mark'
+                  ? `Open Check-in Window (${duration} min)`
+                  : method === 'live'
+                  ? 'Begin Session (Launch Camera)'
+                  : 'Begin Session (Proceed to Upload)'}
+              </span>
             )}
           </button>
         </div>

@@ -14,6 +14,7 @@ import CreateSubject from './components/faculty/CreateSubject'
 import FacultyToday from './components/faculty/FacultyToday'
 import GroupPhotoSession from './components/faculty/GroupPhotoSession'
 import LiveSession from './components/faculty/LiveSession'
+import SelfMarkMonitor from './components/faculty/SelfMarkMonitor'
 import SessionReview from './components/faculty/SessionReview'
 import StartSession from './components/faculty/StartSession'
 import SubjectDashboard from './components/faculty/SubjectDashboard'
@@ -26,6 +27,7 @@ import JoinClass from './components/student/JoinClass'
 import NotificationList from './components/student/NotificationList'
 import StudentAttendance from './components/student/StudentAttendance'
 import StudentHome from './components/student/StudentHome'
+import StudentSelfMark from './components/student/StudentSelfMark'
 
 export default function App() {
   const [user, setUser] = useState(null)
@@ -333,6 +335,15 @@ export default function App() {
                 navigate={navigate}
               />
             )}
+            {page === 'self-mark-monitor' && (
+              <SelfMarkMonitor
+                sessionId={pageParams.sessionId}
+                session={pageParams.session}
+                subjectId={pageParams.subjectId}
+                subject={pageParams.subject}
+                navigate={navigate}
+              />
+            )}
             {page === 'session-review' && (
               <SessionReview
                 sessionId={pageParams.sessionId}
@@ -369,6 +380,13 @@ export default function App() {
             )}
             {page === 'face-registration' && (
               <FaceRegistration user={user} navigate={navigate} />
+            )}
+            {page === 'student-self-mark' && (
+              <StudentSelfMark
+                sessionId={pageParams.sessionId}
+                classInfo={pageParams.classInfo}
+                navigate={navigate}
+              />
             )}
             {page === 'notifications' && (
               <NotificationList navigate={navigate} />

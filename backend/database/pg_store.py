@@ -17,7 +17,7 @@ import atexit
 import json
 import secrets
 import string
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 
 import numpy as np
 from psycopg_pool import ConnectionPool
@@ -80,7 +80,9 @@ CREATE TABLE IF NOT EXISTS attendance_sessions (
     start_time TIME NOT NULL,
     end_time TIME,
     status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'finalized')),
-    method TEXT NOT NULL DEFAULT 'live' CHECK(method IN ('live', 'group_photo')),
+    method TEXT NOT NULL DEFAULT 'live' CHECK(method IN ('live', 'group_photo', 'self_mark')),
+    open_until TIMESTAMPTZ,
+    allow_self_mark BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -151,6 +153,15 @@ def init_db() -> None:
         _safe_add_column(conn, "students", "user_id", "INTEGER REFERENCES users(id)")
         _safe_add_column(conn, "attendance", "session_id", "INTEGER REFERENCES attendance_sessions(id)")
         _safe_add_column(conn, "attendance", "manually_set", "BOOLEAN NOT NULL DEFAULT FALSE")
+        _safe_add_column(conn, "attendance_sessions", "open_until", "TIMESTAMPTZ")
+        _safe_add_column(conn, "attendance_sessions", "allow_self_mark", "BOOLEAN NOT NULL DEFAULT TRUE")
+        # Allow the new 'self_mark' method value on pre-existing tables.
+        try:
+            conn.execute("ALTER TABLE attendance_sessions DROP CONSTRAINT IF EXISTS attendance_sessions_method_check")
+            conn.execute("ALTER TABLE attendance_sessions ADD CONSTRAINT attendance_sessions_method_check "
+                         "CHECK (method IN ('live', 'group_photo', 'self_mark'))")
+        except Exception:
+            pass
         try:
             conn.execute("ALTER TABLE attendance DROP CONSTRAINT IF EXISTS attendance_student_id_session_date_key")
         except Exception:
@@ -333,7 +344,15 @@ def has_marked_attendance_session(student_id: int, session_id: int) -> bool:
         return r is not None
 
 
+def _canonical_status(status: str) -> str:
+    """Normalize status casing so counts stay consistent. Recognition writes
+    'Present'; the UI sends lowercase 'present'/'absent'/'pending_review'."""
+    s = (status or "").strip().lower()
+    return {"present": "Present", "absent": "Absent"}.get(s, "Pending_Review" if s == "pending_review" else (status or "Absent"))
+
+
 def update_attendance_status(student_id: int, session_id: int, status: str, manually_set: bool = True) -> bool:
+    status = _canonical_status(status)
     with _get_pool().connection() as conn:
         r = conn.execute(
             "SELECT id FROM attendance WHERE student_id = %s AND session_id = %s",
@@ -613,19 +632,25 @@ def approved_student_ids_for_subject(subject_id: int) -> list[int]:
 # Attendance sessions
 # ---------------------------------------------------------------------------
 
-def create_attendance_session(subject_id: int, faculty_id: int, method: str = "live") -> dict:
+def create_attendance_session(subject_id: int, faculty_id: int, method: str = "live",
+                              duration_minutes: int | None = None,
+                              allow_self_mark: bool = True) -> dict:
     session_date = date.today()
     start_time = datetime.now().strftime("%H:%M:%S")
+    open_until = datetime.now(timezone.utc) + timedelta(minutes=duration_minutes) if duration_minutes else None
     with _get_pool().connection() as conn:
         row = conn.execute(
-            """INSERT INTO attendance_sessions (subject_id, faculty_id, session_date, start_time, method)
-               VALUES (%s, %s, %s, %s, %s) RETURNING id""",
-            (subject_id, faculty_id, session_date, start_time, method),
+            """INSERT INTO attendance_sessions
+               (subject_id, faculty_id, session_date, start_time, method, open_until, allow_self_mark)
+               VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+            (subject_id, faculty_id, session_date, start_time, method, open_until, allow_self_mark),
         ).fetchone()
         return {
             "id": row[0], "subject_id": subject_id, "faculty_id": faculty_id,
             "session_date": str(session_date), "start_time": start_time,
             "status": "active", "method": method,
+            "open_until": open_until.isoformat() if open_until else None,
+            "allow_self_mark": allow_self_mark,
         }
 
 
@@ -634,7 +659,9 @@ def get_attendance_session(session_id: int) -> dict | None:
         r = conn.execute(
             """SELECT s.id, s.subject_id, s.faculty_id, s.session_date, s.start_time,
                s.end_time, s.status, s.method, s.created_at,
-               sub.name as subject_name, sub.code as subject_code, sub.section
+               sub.name as subject_name, sub.code as subject_code, sub.section,
+               s.open_until, s.allow_self_mark,
+               (s.status = 'active' AND (s.open_until IS NULL OR s.open_until > now())) as is_open
                FROM attendance_sessions s
                JOIN subjects sub ON sub.id = s.subject_id
                WHERE s.id = %s""",
@@ -648,6 +675,8 @@ def get_attendance_session(session_id: int) -> dict | None:
             "end_time": str(r[5]) if r[5] else None, "status": r[6],
             "method": r[7], "created_at": str(r[8]),
             "subject_name": r[9], "subject_code": r[10], "section": r[11],
+            "open_until": r[12].isoformat() if r[12] else None,
+            "allow_self_mark": bool(r[13]), "is_open": bool(r[14]),
         }
 
 
@@ -666,7 +695,7 @@ def list_sessions_for_subject(subject_id: int) -> list[dict]:
         rows = conn.execute(
             """SELECT s.id, s.subject_id, s.faculty_id, s.session_date, s.start_time,
                s.end_time, s.status, s.method,
-               (SELECT COUNT(*) FROM attendance a WHERE a.session_id = s.id AND a.status = 'Present') as present_count,
+               (SELECT COUNT(*) FROM attendance a WHERE a.session_id = s.id AND LOWER(a.status) = 'present') as present_count,
                (SELECT COUNT(*) FROM attendance a WHERE a.session_id = s.id) as total_count
                FROM attendance_sessions s
                WHERE s.subject_id = %s
@@ -851,7 +880,10 @@ def session_for_schedule_today(subject_id: int, session_date: date | None = None
     with _get_pool().connection() as conn:
         r = conn.execute(
             """SELECT s.id, s.status, s.method, s.start_time,
-               (SELECT COUNT(*) FROM attendance a WHERE a.session_id = s.id AND a.status = 'Present') as present_count
+               (SELECT COUNT(*) FROM attendance a WHERE a.session_id = s.id AND LOWER(a.status) = 'present') as present_count,
+               s.allow_self_mark,
+               (s.status = 'active' AND (s.open_until IS NULL OR s.open_until > now())) as is_open,
+               s.open_until
                FROM attendance_sessions s
                WHERE s.subject_id = %s AND s.session_date = %s
                ORDER BY s.start_time DESC LIMIT 1""",
@@ -860,4 +892,6 @@ def session_for_schedule_today(subject_id: int, session_date: date | None = None
         if not r:
             return None
         return {"id": r[0], "status": r[1], "method": r[2],
-                "start_time": str(r[3]), "present_count": r[4]}
+                "start_time": str(r[3]), "present_count": r[4],
+                "allow_self_mark": bool(r[5]), "is_open": bool(r[6]),
+                "open_until": r[7].isoformat() if r[7] else None}

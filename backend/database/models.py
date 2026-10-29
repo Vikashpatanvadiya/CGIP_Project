@@ -164,8 +164,21 @@ def has_marked_attendance_session(student_id: int, session_id: int) -> bool:
         return row is not None
 
 
+def _canonical_status(status: str) -> str:
+    """Normalize status casing so counts stay consistent ('Present'/'Absent')."""
+    s = (status or "").strip().lower()
+    if s == "present":
+        return "Present"
+    if s == "absent":
+        return "Absent"
+    if s == "pending_review":
+        return "Pending_Review"
+    return status or "Absent"
+
+
 def update_attendance_status(student_id: int, session_id: int, status: str, manually_set: bool = True) -> bool:
     """Update or insert an attendance record for a student in a session."""
+    status = _canonical_status(status)
     with get_connection() as conn:
         existing = conn.execute(
             "SELECT id FROM attendance WHERE student_id = ? AND session_id = ?",
@@ -418,20 +431,37 @@ def approved_student_ids_for_subject(subject_id: int) -> list[int]:
 # Attendance sessions
 # ---------------------------------------------------------------------------
 
-def create_attendance_session(subject_id: int, faculty_id: int, method: str = "live") -> dict:
+def create_attendance_session(subject_id: int, faculty_id: int, method: str = "live",
+                              duration_minutes: int | None = None,
+                              allow_self_mark: bool = True) -> dict:
+    from datetime import timedelta
     session_date = date.today().isoformat()
     start_time = datetime.now().strftime("%H:%M:%S")
+    open_until = (datetime.now() + timedelta(minutes=duration_minutes)).isoformat() if duration_minutes else None
     with get_connection() as conn:
         cursor = conn.execute(
-            """INSERT INTO attendance_sessions (subject_id, faculty_id, session_date, start_time, method)
-               VALUES (?, ?, ?, ?, ?)""",
-            (subject_id, faculty_id, session_date, start_time, method),
+            """INSERT INTO attendance_sessions
+               (subject_id, faculty_id, session_date, start_time, method, open_until, allow_self_mark)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (subject_id, faculty_id, session_date, start_time, method, open_until, 1 if allow_self_mark else 0),
         )
         return {
             "id": cursor.lastrowid, "subject_id": subject_id, "faculty_id": faculty_id,
             "session_date": session_date, "start_time": start_time,
             "status": "active", "method": method,
+            "open_until": open_until, "allow_self_mark": allow_self_mark,
         }
+
+
+def _session_is_open(status: str, open_until: str | None) -> bool:
+    if status != "active":
+        return False
+    if not open_until:
+        return True
+    try:
+        return datetime.fromisoformat(open_until) > datetime.now()
+    except ValueError:
+        return True
 
 
 def get_attendance_session(session_id: int) -> dict | None:
@@ -439,13 +469,19 @@ def get_attendance_session(session_id: int) -> dict | None:
         row = conn.execute(
             """SELECT s.id, s.subject_id, s.faculty_id, s.session_date, s.start_time,
                s.end_time, s.status, s.method, s.created_at,
-               sub.name as subject_name, sub.code as subject_code, sub.section
+               sub.name as subject_name, sub.code as subject_code, sub.section,
+               s.open_until, s.allow_self_mark
                FROM attendance_sessions s
                JOIN subjects sub ON sub.id = s.subject_id
                WHERE s.id = ?""",
             (session_id,),
         ).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        d = dict(row)
+        d["allow_self_mark"] = bool(d.get("allow_self_mark", 1))
+        d["is_open"] = _session_is_open(d.get("status"), d.get("open_until"))
+        return d
 
 
 def finalize_session(session_id: int) -> bool:
@@ -463,7 +499,7 @@ def list_sessions_for_subject(subject_id: int) -> list[dict]:
         rows = conn.execute(
             """SELECT s.id, s.subject_id, s.faculty_id, s.session_date, s.start_time,
                s.end_time, s.status, s.method,
-               (SELECT COUNT(*) FROM attendance a WHERE a.session_id = s.id AND a.status = 'Present') as present_count,
+               (SELECT COUNT(*) FROM attendance a WHERE a.session_id = s.id AND LOWER(a.status) = 'present') as present_count,
                (SELECT COUNT(*) FROM attendance a WHERE a.session_id = s.id) as total_count
                FROM attendance_sessions s
                WHERE s.subject_id = ?
@@ -625,8 +661,8 @@ def session_for_schedule_today(subject_id: int, session_date=None) -> dict | Non
     sd = session_date.isoformat() if hasattr(session_date, "isoformat") else session_date
     with get_connection() as conn:
         row = conn.execute(
-            """SELECT s.id, s.status, s.method, s.start_time,
-               (SELECT COUNT(*) FROM attendance a WHERE a.session_id = s.id AND a.status = 'Present') as present_count
+            """SELECT s.id, s.status, s.method, s.start_time, s.open_until, s.allow_self_mark,
+               (SELECT COUNT(*) FROM attendance a WHERE a.session_id = s.id AND LOWER(a.status) = 'present') as present_count
                FROM attendance_sessions s
                WHERE s.subject_id = ? AND s.session_date = ?
                ORDER BY s.start_time DESC LIMIT 1""",
@@ -635,7 +671,10 @@ def session_for_schedule_today(subject_id: int, session_date=None) -> dict | Non
         if not row:
             return None
         return {"id": row["id"], "status": row["status"], "method": row["method"],
-                "start_time": row["start_time"], "present_count": row["present_count"]}
+                "start_time": row["start_time"], "present_count": row["present_count"],
+                "allow_self_mark": bool(row["allow_self_mark"]) if row["allow_self_mark"] is not None else True,
+                "is_open": _session_is_open(row["status"], row["open_until"]),
+                "open_until": row["open_until"]}
 
 
 # ---------------------------------------------------------------------------

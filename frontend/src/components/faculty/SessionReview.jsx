@@ -25,10 +25,11 @@ export default function SessionReview({ sessionId, session, subjectId, subject, 
       setAttendanceRecords(list)
       if (sess) setSessionDetail(sess)
 
-      // Initialize statusMap from server records
+      // Initialize statusMap from server records. Normalize casing: the
+      // recognition path stores 'Present' (capital), the UI works in lowercase.
       const initialMap = {}
       list.forEach((rec) => {
-        initialMap[rec.student_id] = rec.status || 'absent'
+        initialMap[rec.student_id] = (rec.status || 'absent').toLowerCase()
       })
       setStatusMap(initialMap)
     } catch (err) {
@@ -73,7 +74,7 @@ export default function SessionReview({ sessionId, session, subjectId, subject, 
   const totalCount = attendanceRecords.length
 
   const filteredRecords = attendanceRecords.filter((rec) => {
-    const currentStatus = statusMap[rec.student_id] || rec.status
+    const currentStatus = statusMap[rec.student_id] || (rec.status || 'absent').toLowerCase()
     if (filter === 'all') return true
     return currentStatus === filter
   })
@@ -241,8 +242,9 @@ export default function SessionReview({ sessionId, session, subjectId, subject, 
             </thead>
             <tbody className="divide-y divide-slate-800">
               {filteredRecords.map((rec) => {
-                const currentStatus = statusMap[rec.student_id] || rec.status || 'absent'
-                const isManuallyChanged = currentStatus !== (rec.status || 'absent')
+                const recStatus = (rec.status || 'absent').toLowerCase()
+                const currentStatus = statusMap[rec.student_id] || recStatus
+                const isManuallyChanged = currentStatus !== recStatus
 
                 return (
                   <tr

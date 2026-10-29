@@ -147,10 +147,18 @@ export async function rejectEnrollment(id) {
 // Sessions (Faculty) API
 // ==========================================
 
-export async function createSession(subjectId, { method }) {
+export async function createSession(subjectId, { method, duration_minutes, allow_self_mark } = {}) {
   const res = await request(`/subjects/${subjectId}/sessions`, {
     method: 'POST',
-    body: JSON.stringify({ method }),
+    body: JSON.stringify({ method, duration_minutes, allow_self_mark }),
+  })
+  return res.json()
+}
+
+export async function selfMarkAttendance(sessionId, images) {
+  const res = await request(`/sessions/${sessionId}/self-mark`, {
+    method: 'POST',
+    body: JSON.stringify({ images }),
   })
   return res.json()
 }

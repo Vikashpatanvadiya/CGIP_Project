@@ -45,6 +45,7 @@ class DetectedFace:
     h: int
     embedding: np.ndarray  # 512-d, L2-normalized (cosine == dot product)
     det_score: float
+    kps: np.ndarray | None = None  # 5x2: [left_eye, right_eye, nose, l_mouth, r_mouth]
 
     @property
     def top_left(self) -> tuple[int, int]:
@@ -53,6 +54,21 @@ class DetectedFace:
     @property
     def bottom_right(self) -> tuple[int, int]:
         return self.x + self.w, self.y + self.h
+
+    @property
+    def nose_offset_ratio(self) -> float | None:
+        """Horizontal offset of the nose from the eye-midpoint, normalized by
+        inter-eye distance. Swings as the head turns left/right, but stays ~fixed
+        for a flat (photo/screen) face — the basis of the head-turn liveness check.
+        """
+        if self.kps is None or len(self.kps) < 3:
+            return None
+        le, re, nose = self.kps[0], self.kps[1], self.kps[2]
+        eye_mid_x = (le[0] + re[0]) / 2.0
+        inter = float(np.hypot(re[0] - le[0], re[1] - le[1]))
+        if inter < 1.0:
+            return None
+        return (float(nose[0]) - eye_mid_x) / inter
 
 
 def _get_app():
@@ -95,6 +111,7 @@ def detect_and_embed(image_bgr: np.ndarray) -> list[DetectedFace]:
                 h=max(0, y2 - y1),
                 embedding=np.asarray(face.normed_embedding, dtype=np.float32),
                 det_score=float(face.det_score),
+                kps=np.asarray(face.kps, dtype=np.float32) if getattr(face, "kps", None) is not None else None,
             )
         )
 

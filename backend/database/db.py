@@ -89,7 +89,9 @@ CREATE TABLE IF NOT EXISTS attendance_sessions (
     start_time TEXT NOT NULL,
     end_time TEXT,
     status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'finalized')),
-    method TEXT NOT NULL DEFAULT 'live' CHECK(method IN ('live', 'group_photo')),
+    method TEXT NOT NULL DEFAULT 'live' CHECK(method IN ('live', 'group_photo', 'self_mark')),
+    open_until TEXT,
+    allow_self_mark INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -168,6 +170,8 @@ def _migrate_attendance_constraint(conn) -> None:
 def _migrate_students_user_id(conn) -> None:
     """Add user_id column to students table if not present."""
     _safe_add_column(conn, "students", "user_id", "INTEGER")
+    _safe_add_column(conn, "attendance_sessions", "open_until", "TEXT")
+    _safe_add_column(conn, "attendance_sessions", "allow_self_mark", "INTEGER", default=1)
 
 
 def init_db() -> None:
