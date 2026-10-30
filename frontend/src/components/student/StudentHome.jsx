@@ -52,11 +52,11 @@ export default function StudentHome({ user, navigate }) {
       {/* Top Welcome & Notification Bar */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight text-white md:text-3xl">
-            Welcome, {user?.name || 'Student'}! 👋
+          <h2 className="font-display text-3xl font-semibold tracking-tight text-slate-100">
+            Hello, {user?.name?.split(' ')[0] || 'Student'}
           </h2>
           <p className="mt-1 text-sm text-slate-400">
-            Track your classes, face recognition status, and real-time attendance
+            Your classes, face setup, and attendance — all in one place.
           </p>
         </div>
 
@@ -90,29 +90,27 @@ export default function StudentHome({ user, navigate }) {
         </div>
       </div>
 
-      {/* Face Registration Callout Banner */}
-      <div className="relative overflow-hidden rounded-2xl border border-indigo-500/30 bg-gradient-to-r from-indigo-950/40 via-purple-950/30 to-slate-900/60 p-5 shadow-xl backdrop-blur">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-indigo-600/20 text-indigo-400 ring-1 ring-indigo-500/30">
-              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 004 11m0 0a8.003 8.003 0 0115.357-2m1.571 2.495A13.978 13.978 0 0120 11" />
-              </svg>
-            </div>
-            <div>
-              <h3 className="font-bold text-white">Biometric Face Registration</h3>
-              <p className="text-xs text-slate-300">
-                Register or refresh your 3 face samples so faculty cameras recognize you in live attendance.
-              </p>
-            </div>
+      {/* Face setup callout */}
+      <div className="flex flex-col gap-4 rounded-2xl border border-slate-700 bg-slate-800 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-400">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
           </div>
-          <button
-            onClick={() => navigate('face-registration')}
-            className="shrink-0 rounded-lg bg-indigo-600/80 px-4 py-2 text-xs font-semibold text-white shadow transition hover:bg-indigo-500 hover:shadow-indigo-500/20"
-          >
-            Register / Update Face ID →
-          </button>
+          <div>
+            <h3 className="font-display text-base font-semibold text-slate-100">Set up your Face ID</h3>
+            <p className="text-xs text-slate-400">
+              Capture a few samples once so you can check yourself in during class.
+            </p>
+          </div>
         </div>
+        <button
+          onClick={() => navigate('face-registration')}
+          className="btn-cream shrink-0 px-4 py-2 text-xs"
+        >
+          Register / update
+        </button>
       </div>
 
       {/* Summary Cards */}

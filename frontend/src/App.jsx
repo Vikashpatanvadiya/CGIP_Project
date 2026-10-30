@@ -105,32 +105,28 @@ export default function App() {
   if (!user) {
     return (
       <div className="min-h-screen bg-slate-900 text-slate-100">
-        <header className="border-b border-slate-800 px-6 py-4">
+        <header className="border-b border-slate-800 px-6 py-5">
           <div className="mx-auto flex max-w-7xl items-center justify-between">
-            <div>
-              <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600 text-sm font-black text-white">
-                  A
-                </span>
-                Subject-Wise Attendance System
-              </h1>
-              <p className="text-xs text-slate-400">
-                Facial Biometric Recognition · CMP513 & CMP514
-              </p>
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-indigo-500 text-[15px] font-bold text-slate-950">a</span>
+              <div className="leading-none">
+                <div className="font-display text-[17px] font-semibold tracking-tight text-slate-100">Attendance</div>
+                <div className="mt-0.5 text-[11px] text-slate-500">CMP513 · CMP514</div>
+              </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-1">
               <button
                 onClick={() => navigate('login')}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                  page === 'login' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
+                  page === 'login' ? 'btn-cream' : 'text-slate-400 hover:text-slate-100'
                 }`}
               >
-                Sign In
+                Sign in
               </button>
               <button
                 onClick={() => navigate('register')}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                  page === 'register' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
+                  page === 'register' ? 'btn-cream' : 'text-slate-400 hover:text-slate-100'
                 }`}
               >
                 Register
@@ -160,15 +156,10 @@ export default function App() {
               onClick={() => navigate(user.role === 'faculty' ? 'subjects' : 'student-home')}
               className="cursor-pointer"
             >
-              <h1 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
-                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600 text-sm font-black text-white shadow-md shadow-indigo-600/30">
-                  A
-                </span>
-                <span className="hidden sm:inline">Subject Attendance</span>
-              </h1>
-              <p className="text-[11px] text-slate-400">
-                Krishna Patel · Maitra Prajapati · Vikas Patanwadiya
-              </p>
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-indigo-500 text-[15px] font-bold text-slate-950">a</span>
+                <span className="hidden font-display text-[17px] font-semibold tracking-tight text-slate-100 sm:inline">Attendance</span>
+              </div>
             </div>
 
             {/* Quick role-specific top nav tabs */}

@@ -1,1 +1,109 @@
+/* Fonts: Clash Grotesk (display) + Plus Jakarta Sans (body) — Metengine brand */
+@import url('https://api.fontshare.com/v2/css?f[]=clash-grotesk@400,500,600,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
+
+/*
+  Brand retheme. The app was built with Tailwind's slate/indigo/emerald/red
+  palette; rather than touch every component we redefine those tokens to the
+  Metengine palette (metengine.xyz/brand). Result: a warm, near-black editorial
+  theme — cream primary actions, orange + mint accents — applied app-wide.
+*/
+@theme {
+  /* Canvas + surfaces + text (remapped "slate" = warm neutral ramp) */
+  --color-slate-950: #060607;
+  --color-slate-900: #0b0b0c;  /* app background */
+  --color-slate-800: #151517;  /* cards / panels */
+  --color-slate-750: #1c1c1f;
+  --color-slate-700: #292a2e;  /* hairline borders */
+  --color-slate-600: #3a3b40;
+  --color-slate-500: #6f6b63;  /* faint text */
+  --color-slate-400: #9b968c;  /* secondary text */
+  --color-slate-300: #c6c1b7;
+  --color-slate-200: #e5e0d6;
+  --color-slate-100: #f3efe7;  /* near-white cream */
+  --color-slate-50:  #faf7f1;
+
+  /* Primary accent = warm orange (remapped "indigo") */
+  --color-indigo-950: #2a1705;
+  --color-indigo-900: #3a2008;
+  --color-indigo-700: #cf6708;
+  --color-indigo-600: #e6740c;  /* primary button bg (white text readable) */
+  --color-indigo-500: #ff9125;  /* bright accent */
+  --color-indigo-400: #fda24a;  /* links / accent text */
+  --color-indigo-300: #fbdc7b;
+  --color-indigo-200: #f5e28d;
+
+  /* Positive = mint (remapped "emerald") */
+  --color-emerald-950: #06281d;
+  --color-emerald-700: #228a69;
+  --color-emerald-600: #28a37c;
+  --color-emerald-500: #45d09d;
+  --color-emerald-400: #45d09d;
+
+  /* Negative / destructive = coral (remapped "red") */
+  --color-red-950: #2a0d0a;
+  --color-red-700: #c23c32;
+  --color-red-600: #db463b;
+  --color-red-500: #f16056;
+  --color-red-400: #f16056;
+
+  /* Warning / highlight = gold (remapped "amber") */
+  --color-amber-600: #cfa81f;
+  --color-amber-500: #e4bf2f;
+  --color-amber-400: #fbdc7b;
+
+  /* Faculty badge accent (remapped "purple") -> warm gold tone */
+  --color-purple-500: #e4bf2f;
+  --color-purple-400: #fbdc7b;
+
+  --color-indigo-650: #e6740c;
+
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Clash Grotesk", "Plus Jakarta Sans", sans-serif;
+}
+
+html {
+  background: #0b0b0c;
+}
+
+body {
+  font-family: var(--font-sans);
+  letter-spacing: -0.02em;
+  background: #0b0b0c;
+  color: #f3efe7;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Display font for all headings and anything opting in with .font-display */
+h1, h2, h3, h4, h5, .font-display {
+  font-family: var(--font-display);
+  letter-spacing: 0;
+  font-weight: 600;
+}
+
+/* Numbers (codes, counts, times) read better tabular + monospaced-ish */
+.tabular-nums { font-variant-numeric: tabular-nums; }
+
+/* Native date input: keep the picker icon visible on dark surfaces */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+  cursor: pointer;
+}
+
+/* Cream "pill" primary action — the brand's signature CTA */
+.btn-cream {
+  background: #f3efe7;
+  color: #0b0b0c;
+  border-radius: 9999px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  transition: transform 0.12s ease, background 0.15s ease;
+}
+.btn-cream:hover { background: #ffffff; }
+.btn-cream:active { transform: scale(0.98); }
+.btn-cream:disabled { opacity: 0.5; }
+
+/* Subtle page grain/texture hook (optional, used on hero surfaces) */
+.hairline { border-color: rgba(243, 239, 231, 0.08); }
