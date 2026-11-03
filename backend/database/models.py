@@ -11,6 +11,7 @@ sessions, and notifications for the subject-wise attendance system.
 
 import json
 import secrets
+import sqlite3
 import string
 from datetime import date, datetime
 
@@ -447,6 +448,41 @@ def approved_student_ids_for_subject(subject_id: int) -> list[int]:
             (subject_id,),
         ).fetchall()
         return [row["id"] for row in rows]
+
+
+def save_session_photo(session_id: int, image_bytes: bytes, content_type: str = "image/jpeg") -> int:
+    with get_connection() as conn:
+        cur = conn.execute(
+            "INSERT INTO session_photos (session_id, image, content_type) VALUES (?, ?, ?)",
+            (session_id, sqlite3.Binary(image_bytes), content_type),
+        )
+        return cur.lastrowid
+
+
+def session_photos_with_data(session_id: int) -> list[dict]:
+    import base64
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, image, content_type, captured_at FROM session_photos "
+            "WHERE session_id = ? ORDER BY captured_at",
+            (session_id,),
+        ).fetchall()
+        out = []
+        for r in rows:
+            raw = bytes(r["image"]) if r["image"] is not None else b""
+            b64 = base64.b64encode(raw).decode()
+            out.append({
+                "id": r["id"], "content_type": r["content_type"], "captured_at": r["captured_at"],
+                "image": f"data:{r['content_type']};base64,{b64}",
+            })
+        return out
+
+
+def count_session_photos(session_id: int) -> int:
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM session_photos WHERE session_id = ?", (session_id,)
+        ).fetchone()[0]
 
 
 def open_self_mark_sessions_for_student(student_user_id: int) -> list[dict]:

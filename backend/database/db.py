@@ -213,6 +213,14 @@ def init_db() -> None:
                 UNIQUE(student_id, session_date, session_id)
             );
 
+            CREATE TABLE IF NOT EXISTS session_photos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL REFERENCES attendance_sessions(id),
+                image BLOB NOT NULL,
+                content_type TEXT NOT NULL DEFAULT 'image/jpeg',
+                captured_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
             CREATE TABLE IF NOT EXISTS scheduled_classes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 faculty_id INTEGER NOT NULL REFERENCES users(id),

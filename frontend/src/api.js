@@ -207,6 +207,11 @@ export async function getSessionAttendance(sessionId) {
   return res.json()
 }
 
+export async function getSessionPhotos(sessionId) {
+  const res = await request(`/sessions/${sessionId}/photos`)
+  return res.json()
+}
+
 // ==========================================
 // Student API
 // ==========================================

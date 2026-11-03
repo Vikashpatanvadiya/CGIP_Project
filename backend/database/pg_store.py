@@ -14,6 +14,7 @@ sessions, and notifications for the subject-wise attendance system.
 """
 
 import atexit
+import base64
 import json
 import secrets
 import string
@@ -106,6 +107,14 @@ CREATE TABLE IF NOT EXISTS notifications (
     related_session_id INTEGER REFERENCES attendance_sessions(id),
     is_read BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS session_photos (
+    id SERIAL PRIMARY KEY,
+    session_id INTEGER NOT NULL REFERENCES attendance_sessions(id),
+    image BYTEA NOT NULL,
+    content_type TEXT NOT NULL DEFAULT 'image/jpeg',
+    captured_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS scheduled_classes (
@@ -735,6 +744,42 @@ def finalize_session(session_id: int) -> bool:
             (end_time, session_id),
         )
         return True
+
+
+def save_session_photo(session_id: int, image_bytes: bytes, content_type: str = "image/jpeg") -> int:
+    """Store a faculty-uploaded evidence photo for a session."""
+    with _get_pool().connection() as conn:
+        row = conn.execute(
+            "INSERT INTO session_photos (session_id, image, content_type) VALUES (%s, %s, %s) RETURNING id",
+            (session_id, image_bytes, content_type),
+        ).fetchone()
+        return row[0]
+
+
+def session_photos_with_data(session_id: int) -> list[dict]:
+    """All evidence photos for a session, as base64 data URLs for inline view."""
+    with _get_pool().connection() as conn:
+        rows = conn.execute(
+            "SELECT id, image, content_type, captured_at FROM session_photos "
+            "WHERE session_id = %s ORDER BY captured_at",
+            (session_id,),
+        ).fetchall()
+        out = []
+        for r in rows:
+            raw = bytes(r[1]) if r[1] is not None else b""
+            b64 = base64.b64encode(raw).decode()
+            out.append({
+                "id": r[0], "content_type": r[2], "captured_at": str(r[3]),
+                "image": f"data:{r[2]};base64,{b64}",
+            })
+        return out
+
+
+def count_session_photos(session_id: int) -> int:
+    with _get_pool().connection() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM session_photos WHERE session_id = %s", (session_id,)
+        ).fetchone()[0]
 
 
 def list_sessions_for_subject(subject_id: int) -> list[dict]:

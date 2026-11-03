@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { finalizeSession, getSession, getSessionAttendance } from '../../api'
+import { finalizeSession, getSession, getSessionAttendance, getSessionPhotos } from '../../api'
 
 export default function SessionReview({ sessionId, session, subjectId, subject, navigate }) {
   const [attendanceRecords, setAttendanceRecords] = useState([])
   const [statusMap, setStatusMap] = useState({}) // student_id -> status ('present', 'absent', 'pending_review')
+  const [photos, setPhotos] = useState([])
+  const [lightbox, setLightbox] = useState(null)
   const [sessionDetail, setSessionDetail] = useState(session || null)
   const [loading, setLoading] = useState(true)
   const [finalizing, setFinalizing] = useState(false)
@@ -16,13 +18,15 @@ export default function SessionReview({ sessionId, session, subjectId, subject, 
     setLoading(true)
     setError(null)
     try {
-      const [records, sess] = await Promise.all([
+      const [records, sess, photoList] = await Promise.all([
         getSessionAttendance(sessionId).catch(() => []),
         getSession(sessionId).catch(() => session),
+        getSessionPhotos(sessionId).catch(() => []),
       ])
 
       const list = records || []
       setAttendanceRecords(list)
+      setPhotos(photoList || [])
       if (sess) setSessionDetail(sess)
 
       // Initialize statusMap from server records. Normalize casing: the
@@ -182,6 +186,44 @@ export default function SessionReview({ sessionId, session, subjectId, subject, 
           </div>
         </div>
       </div>
+
+      {/* Evidence photos — proof the faculty uploaded for this session */}
+      {photos.length > 0 && (
+        <div className="rounded-2xl border border-slate-700 bg-slate-800/60 p-5">
+          <div className="mb-3 flex items-center gap-2">
+            <svg className="h-4 w-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <h3 className="font-display text-sm font-semibold text-slate-100">Attendance evidence</h3>
+            <span className="text-xs text-slate-500">({photos.length} photo{photos.length === 1 ? '' : 's'})</span>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {photos.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setLightbox(p)}
+                className="group relative overflow-hidden rounded-lg border border-slate-700"
+                title={`Captured ${p.captured_at}`}
+              >
+                <img src={p.image} alt="evidence" className="h-24 w-32 object-cover transition group-hover:opacity-80" />
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-slate-500">Saved for the record — tap to view full size.</p>
+        </div>
+      )}
+
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setLightbox(null)}
+        >
+          <div className="max-h-[90vh] max-w-4xl overflow-auto" onClick={(e) => e.stopPropagation()}>
+            <img src={lightbox.image} alt="evidence full" className="rounded-xl" />
+            <p className="mt-2 text-center text-xs text-slate-400">Captured {lightbox.captured_at}</p>
+          </div>
+        </div>
+      )}
 
       {/* Filter Tabs */}
       <div className="flex items-center justify-between border-b border-slate-800 pb-3">

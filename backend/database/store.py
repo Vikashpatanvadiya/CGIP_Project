@@ -80,6 +80,9 @@ create_attendance_session = _backend.create_attendance_session
 get_attendance_session = _backend.get_attendance_session
 finalize_session = _backend.finalize_session
 list_sessions_for_subject = _backend.list_sessions_for_subject
+save_session_photo = _backend.save_session_photo
+session_photos_with_data = _backend.session_photos_with_data
+count_session_photos = _backend.count_session_photos
 
 # ---------------------------------------------------------------------------
 # Notifications

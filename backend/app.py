@@ -360,12 +360,30 @@ def mark_session_group_photo(session_id: int):
     allowed_ids = models.approved_student_ids_for_subject(session["subject_id"]) if session else None
     results = process_frame(photo, session_id=session_id, allowed_student_ids=allowed_ids)
     recognized = [r for r in results if r.student_id is not None]
+
+    # Save the uploaded photo as attendance evidence (re-encoded to JPEG).
+    try:
+        ok, buf = cv2.imencode(".jpg", photo, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+        if ok:
+            models.save_session_photo(session_id, buf.tobytes(), "image/jpeg")
+    except Exception as exc:  # noqa: BLE001 - never fail attendance over evidence save
+        app.logger.warning("Could not save session photo: %s", exc)
+
     return jsonify({
         "faces_detected": len(results),
         "recognized": len(recognized),
         "newly_marked": sum(1 for r in recognized if r.attendance_marked),
         "results": [_face_result_json(r) for r in results],
     })
+
+
+@app.get("/api/sessions/<int:session_id>/photos")
+def get_session_photos(session_id: int):
+    """Faculty-only: the evidence photos stored for a session (as data URLs)."""
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    return jsonify(models.session_photos_with_data(session_id))
 
 
 @app.post("/api/sessions/<int:session_id>/self-mark")
