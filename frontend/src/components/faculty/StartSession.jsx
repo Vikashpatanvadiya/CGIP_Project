@@ -1,13 +1,17 @@
 import { useState } from 'react'
 import { createSession } from '../../api'
 
-export default function StartSession({ subjectId, subject, navigate }) {
+export default function StartSession({ subjectId, subject, navigate, date }) {
   const [method, setMethod] = useState('self_mark') // 'self_mark' | 'live' | 'group_photo'
   const [duration, setDuration] = useState(5) // minutes students can self check-in
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  const currentDate = new Date().toLocaleDateString(undefined, {
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const isBackdated = Boolean(date) && date !== todayStr
+  const sessionDay = date ? new Date(`${date}T00:00:00`) : new Date()
+
+  const currentDate = sessionDay.toLocaleDateString(undefined, {
     weekday: 'long',
     year: 'numeric',
     month: 'long',
@@ -24,11 +28,28 @@ export default function StartSession({ subjectId, subject, navigate }) {
 
     try {
       const opts = { method }
+      if (date) opts.session_date = date
       if (method === 'self_mark') {
         opts.duration_minutes = duration
         opts.allow_self_mark = true
       }
       const session = await createSession(subjectId, opts)
+
+      // A class can only be marked once per day. If one already exists, the
+      // backend returns it with existing:true — resume or review it instead.
+      if (session.existing) {
+        if (session.status !== 'active') {
+          navigate('session-review', { sessionId: session.id, session, subjectId, subject })
+        } else if (session.method === 'self_mark') {
+          navigate('self-mark-monitor', { sessionId: session.id, session, subjectId, subject })
+        } else if (session.method === 'group_photo') {
+          navigate('group-photo-session', { sessionId: session.id, session, subjectId, subject })
+        } else {
+          navigate('live-session', { sessionId: session.id, session, subjectId, subject })
+        }
+        return
+      }
+
       if (method === 'self_mark') {
         navigate('self-mark-monitor', { sessionId: session.id, session, subjectId, subject })
       } else if (method === 'live') {
@@ -84,6 +105,12 @@ export default function StartSession({ subjectId, subject, navigate }) {
             <div className="mt-1 font-semibold text-indigo-400">{currentTime}</div>
           </div>
         </div>
+
+        {isBackdated && (
+          <div className="mb-6 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
+            You're recording attendance for a past date ({currentDate}). It will be saved against that day. For a backdated class, "Upload Class Photo" is usually the right method.
+          </div>
+        )}
 
         {error && (
           <div className="mb-6 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400 flex items-start gap-2">

@@ -29,9 +29,9 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10)
 }
 
-export default function FacultyToday({ navigate }) {
+export default function FacultyToday({ navigate, date, onDateChange }) {
   const [data, setData] = useState(null)
-  const [selectedDate, setSelectedDate] = useState(todayStr())
+  const selectedDate = date || todayStr()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -74,7 +74,7 @@ export default function FacultyToday({ navigate }) {
       code: c.course_code,
       section: c.section,
     }
-    navigate('start-session', { subjectId: c.subject_id, subject })
+    navigate('start-session', { subjectId: c.subject_id, subject, date: selectedDate })
   }
 
   const continueSession = (c) => {
@@ -102,20 +102,6 @@ export default function FacultyToday({ navigate }) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <input
-            type="date"
-            value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value || todayStr())}
-            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200"
-          />
-          {!isToday && (
-            <button
-              onClick={() => setSelectedDate(todayStr())}
-              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-700"
-            >
-              Today
-            </button>
-          )}
           <button
             onClick={() => navigate('timetable-import')}
             className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-700"
@@ -231,8 +217,6 @@ export default function FacultyToday({ navigate }) {
                     >
                       Continue
                     </button>
-                  ) : status === 'scheduled' ? (
-                    <span className="text-xs text-slate-500">Not today</span>
                   ) : (
                     <button
                       onClick={() => startAttendance(c)}
@@ -242,7 +226,7 @@ export default function FacultyToday({ navigate }) {
                           : 'bg-indigo-600 hover:bg-indigo-500'
                       }`}
                     >
-                      Start Attendance
+                      {isToday ? 'Take Attendance' : 'Open / Take Attendance'}
                     </button>
                   )}
                 </div>
