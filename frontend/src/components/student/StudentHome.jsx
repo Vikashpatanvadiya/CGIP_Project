@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { getNotifications, getStudentSubjects, getStudentToday } from '../../api'
+import { getNotifications, getStudentSubjects, getStudentToday, getStudentOpenSessions } from '../../api'
 
 function to12h(t) {
   if (!t) return ''
@@ -13,6 +13,8 @@ function to12h(t) {
 export default function StudentHome({ user, navigate }) {
   const [subjects, setSubjects] = useState([])
   const [today, setToday] = useState(null)
+  const [openSessions, setOpenSessions] = useState([])
+  const [hasFace, setHasFace] = useState(true)
   const [unreadCount, setUnreadCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -21,14 +23,17 @@ export default function StudentHome({ user, navigate }) {
     setLoading(true)
     setError(null)
     try {
-      const [subjectsData, notifData, todayData] = await Promise.all([
+      const [subjectsData, notifData, todayData, openData] = await Promise.all([
         getStudentSubjects().catch(() => []),
         getNotifications().catch(() => []),
         getStudentToday().catch(() => null),
+        getStudentOpenSessions().catch(() => null),
       ])
 
       setSubjects(subjectsData || [])
       setToday(todayData)
+      setOpenSessions(openData?.sessions || [])
+      setHasFace(openData?.has_face ?? todayData?.has_face ?? true)
       const unread = (notifData || []).filter((n) => !n.is_read).length
       setUnreadCount(unread)
     } catch (err) {
@@ -40,6 +45,15 @@ export default function StudentHome({ user, navigate }) {
 
   useEffect(() => {
     loadDashboard()
+    // Poll so an open window appears without a manual refresh.
+    const poll = setInterval(async () => {
+      try {
+        const openData = await getStudentOpenSessions()
+        setOpenSessions(openData?.sessions || [])
+        setHasFace(openData?.has_face ?? true)
+      } catch { /* ignore */ }
+    }, 5000)
+    return () => clearInterval(poll)
   }, [loadDashboard])
 
   // Overall attendance calculation
@@ -89,6 +103,41 @@ export default function StudentHome({ user, navigate }) {
           </button>
         </div>
       </div>
+
+      {/* Open check-in windows — the student's way to self-mark */}
+      {openSessions.filter((s) => !s.attended).length > 0 && (
+        <div className="space-y-3">
+          {openSessions.filter((s) => !s.attended).map((s) => (
+            <div
+              key={s.id}
+              className="flex flex-col gap-3 rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-5 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="flex items-center gap-3">
+                <span className="flex h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-emerald-500" />
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-emerald-400">Attendance is open</p>
+                  <h3 className="font-display text-lg font-semibold text-slate-100">
+                    {s.subject_code ? `${s.subject_code} · ` : ''}{s.subject_name}
+                  </h3>
+                  <p className="text-xs text-slate-400">Check in now before the window closes.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  if (!hasFace) { navigate('face-registration'); return }
+                  navigate('student-self-mark', {
+                    sessionId: s.id,
+                    classInfo: { course_code: s.subject_code, course_name: s.subject_name },
+                  })
+                }}
+                className="shrink-0 rounded-full bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500"
+              >
+                {hasFace ? 'Give Attendance' : 'Register Face first'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Face setup callout */}
       <div className="flex flex-col gap-4 rounded-2xl border border-slate-700 bg-slate-800 p-5 sm:flex-row sm:items-center sm:justify-between">

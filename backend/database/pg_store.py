@@ -650,6 +650,31 @@ def approved_student_ids_for_subject(subject_id: int) -> list[int]:
         return [r[0] for r in rows]
 
 
+def open_self_mark_sessions_for_student(student_user_id: int) -> list[dict]:
+    """Active, still-open self check-in sessions for subjects this student is
+    approved-enrolled in — independent of the timetable."""
+    with _get_pool().connection() as conn:
+        rows = conn.execute(
+            """SELECT s.id, s.subject_id, sub.name, sub.code, sub.section, s.open_until
+               FROM attendance_sessions s
+               JOIN subjects sub ON sub.id = s.subject_id
+               WHERE s.status = 'active' AND s.allow_self_mark = TRUE
+                 AND (s.open_until IS NULL OR s.open_until > now())
+                 AND s.subject_id IN (
+                     SELECT subject_id FROM enrollments
+                     WHERE student_user_id = %s AND status = 'approved'
+                 )
+               ORDER BY s.open_until NULLS LAST, s.id DESC""",
+            (student_user_id,),
+        ).fetchall()
+        return [
+            {"id": r[0], "subject_id": r[1], "subject_name": r[2],
+             "subject_code": r[3], "section": r[4],
+             "open_until": r[5].isoformat() if r[5] else None}
+            for r in rows
+        ]
+
+
 # ---------------------------------------------------------------------------
 # Attendance sessions
 # ---------------------------------------------------------------------------

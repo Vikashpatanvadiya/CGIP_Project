@@ -71,6 +71,7 @@ update_enrollment_status = _backend.update_enrollment_status
 list_enrollments_for_subject = _backend.list_enrollments_for_subject
 list_enrollments_for_student = _backend.list_enrollments_for_student
 approved_student_ids_for_subject = _backend.approved_student_ids_for_subject
+open_self_mark_sessions_for_student = _backend.open_self_mark_sessions_for_student
 
 # ---------------------------------------------------------------------------
 # Attendance sessions

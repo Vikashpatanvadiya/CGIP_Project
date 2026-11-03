@@ -493,6 +493,22 @@ def get_student_attendance():
     return jsonify([])
 
 
+@app.get("/api/student/open-sessions")
+def student_open_sessions():
+    """Self check-in windows the student can act on right now — independent of
+    the timetable. Used to always surface a 'Give Attendance' prompt."""
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    student = models.get_student_by_user_id(user["id"])
+    sessions = models.open_self_mark_sessions_for_student(user["id"])
+    out = []
+    for s in sessions:
+        attended = bool(student) and models.has_marked_attendance_session(student["id"], s["id"])
+        out.append({**s, "attended": attended})
+    return jsonify(has_face=bool(student), sessions=out)
+
+
 @app.post("/api/student/register-face")
 def student_register_face():
     user = get_auth_user()

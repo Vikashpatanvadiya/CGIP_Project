@@ -272,6 +272,11 @@ export async function getStudentToday(date) {
   return res.json()
 }
 
+export async function getStudentOpenSessions() {
+  const res = await request('/student/open-sessions')
+  return res.json()
+}
+
 // ==========================================
 // Notifications API
 // ==========================================
