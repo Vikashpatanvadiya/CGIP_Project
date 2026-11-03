@@ -308,9 +308,24 @@ def create_session(subject_id: int):
     except (TypeError, ValueError):
         duration_minutes = None
     allow_self_mark = bool(payload.get("allow_self_mark", True))
+    session_date = None
+    raw_date = payload.get("session_date")
+    if raw_date:
+        try:
+            session_date = date.fromisoformat(raw_date)
+        except (TypeError, ValueError):
+            session_date = None
+
+    # One class = one attendance session per day. If a session already exists
+    # for this subject on this date, hand it back instead of creating a second.
+    existing = models.session_for_schedule_today(subject_id, session_date or date.today())
+    if existing:
+        return jsonify({**existing, "existing": True}), 200
+
     session = models.create_attendance_session(
         subject_id, user["id"], method=method,
         duration_minutes=duration_minutes, allow_self_mark=allow_self_mark,
+        session_date=session_date,
     )
     return jsonify(session), 201
 
@@ -442,6 +457,34 @@ def get_session_attendance(session_id: int):
     return jsonify(models.attendance_for_session(session_id))
 
 
+@app.get("/api/sessions/<int:session_id>/sheet")
+def session_sheet(session_id: int):
+    """The full class roster for a session — present AND absent — so faculty can
+    review everyone and manually flip anyone the recognition missed."""
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    session = models.get_attendance_session(session_id)
+    if not session:
+        return jsonify(error="Session not found"), 404
+    att = {}
+    for a in models.attendance_for_session(session_id):
+        att[a.get("student_id")] = a
+    rows = []
+    for st in models.face_roster_for_subject(session["subject_id"]):
+        a = att.get(st["student_id"])
+        status = str(a.get("status")).lower() if a else "absent"
+        rows.append({
+            "student_id": st["student_id"],
+            "name": st["name"],
+            "enrollment_no": st.get("enrollment_no"),
+            "status": status,
+            "confidence": a.get("confidence") if a else None,
+            "time_in": a.get("time_in") if a else None,
+        })
+    return jsonify(rows)
+
+
 # ==========================================
 # Student API
 # ==========================================
@@ -542,9 +585,13 @@ def student_register_face():
     if not images_b64:
         return jsonify(error="At least one sample image is required"), 400
 
+    existing = models.get_student_by_user_id(user["id"])
     try:
         images = [_decode_base64_image(img) for img in images_b64]
-        student_id = register_student(enrollment_no, name, images)
+        student_id = register_student(
+            enrollment_no, name, images,
+            existing_student_id=existing["id"] if existing else None,
+        )
         models.link_student_to_user(student_id, user["id"])
     except NoFaceDetectedError as exc:
         return jsonify(error=str(exc)), 422
@@ -552,6 +599,24 @@ def student_register_face():
         return jsonify(error=str(exc)), 400
 
     return jsonify(id=student_id, enrollment_no=enrollment_no, name=name), 201
+
+
+@app.get("/api/student/face")
+def student_face():
+    """Whether the signed-in student has registered a face, plus the stored
+    thumbnail so the UI can show it instead of the camera."""
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    student = models.get_student_by_user_id(user["id"])
+    if not student:
+        return jsonify(registered=False)
+    return jsonify(
+        registered=True,
+        enrollment_no=student.get("enrollment_no"),
+        name=student.get("name"),
+        photo=models.get_student_photo(student["id"]),
+    )
 
 
 # ==========================================
@@ -623,6 +688,19 @@ def timetable_list():
     return jsonify(models.list_scheduled_classes(user["id"]))
 
 
+@app.get("/api/student/timetable")
+def student_timetable():
+    """Weekly scheduled classes for the subjects the student is enrolled in."""
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    out = []
+    for day in range(7):
+        for c in models.scheduled_classes_for_student_day(user["id"], day):
+            out.append({**c, "day_of_week": day})
+    return jsonify(out)
+
+
 @app.delete("/api/timetable/<int:class_id>")
 def timetable_delete(class_id: int):
     user = get_auth_user()
@@ -630,6 +708,191 @@ def timetable_delete(class_id: int):
         return jsonify(error="Unauthorized"), 401
     models.delete_scheduled_class(class_id, user["id"])
     return jsonify(success=True)
+
+
+# ==========================================
+# Student directory (Faculty) API
+# ==========================================
+
+@app.get("/api/faculty/students")
+def faculty_students():
+    """Every student enrolled in any of the faculty's subjects."""
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    return jsonify(models.list_students_for_faculty(user["id"]))
+
+
+# ==========================================
+# Attendance overview + session detail API
+# ==========================================
+
+def _present_set(session_id: int):
+    """Enrollment numbers / names of students marked Present in a session."""
+    rows = models.attendance_for_session(session_id)
+    present = {}
+    for r in rows:
+        if str(r.get("status", "")).lower() == "present":
+            key = r.get("enrollment_no") or r.get("name")
+            present[key] = r
+    return present
+
+
+@app.get("/api/faculty/attendance")
+def faculty_attendance_overview():
+    """All attendance sessions across the faculty's subjects, with present /
+    total counts — the data behind the Attendance list screen."""
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    out = []
+    for subj in models.list_subjects_for_faculty(user["id"]):
+        roster = models.results_roster(subj["id"])
+        total = len(roster)
+        for s in models.list_sessions_for_subject(subj["id"]):
+            present = len(_present_set(s["id"]))
+            out.append({
+                "session_id": s["id"],
+                "subject_id": subj["id"],
+                "subject_name": subj["name"],
+                "course_code": subj["code"],
+                "section": subj["section"],
+                "session_date": s.get("session_date"),
+                "start_time": s.get("start_time"),
+                "method": s.get("method"),
+                "status": s.get("status"),
+                "present": present,
+                "absent": max(total - present, 0),
+                "total": total,
+            })
+    out.sort(key=lambda x: (str(x["session_date"]), str(x["start_time"])), reverse=True)
+    return jsonify(out)
+
+
+@app.get("/api/sessions/<int:session_id>/detail")
+def session_detail(session_id: int):
+    """Present + absent student lists for one session (the Detail popup)."""
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    session = models.get_attendance_session(session_id)
+    if not session:
+        return jsonify(error="Session not found"), 404
+    roster = models.results_roster(session["subject_id"])
+    present = _present_set(session_id)
+    present_list, absent_list = [], []
+    for st in roster:
+        key = st.get("enrollment_no") or st.get("name")
+        rec = present.get(key)
+        if rec:
+            present_list.append({
+                "name": st["name"], "enrollment_no": st.get("enrollment_no"),
+                "time_in": str(rec.get("time_in")) if rec.get("time_in") else None,
+            })
+        else:
+            absent_list.append({
+                "name": st["name"], "enrollment_no": st.get("enrollment_no"),
+            })
+    return jsonify(
+        session_id=session_id,
+        subject_id=session["subject_id"],
+        session_date=session.get("session_date"),
+        present=present_list,
+        absent=absent_list,
+    )
+
+
+# ==========================================
+# Exam results API
+# ==========================================
+
+@app.get("/api/subjects/<int:subject_id>/results")
+def subject_results(subject_id: int):
+    """Without ?exam_name: the subject's roster + list of exams.
+    With ?exam_name=<name>: that exam's marks merged onto the roster."""
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    roster = models.results_roster(subject_id)
+    exam_name = request.args.get("exam_name")
+    if not exam_name:
+        return jsonify(roster=roster, exams=models.list_exams_for_subject(subject_id))
+
+    marks = {m["student_user_id"]: m for m in models.results_for_exam(subject_id, exam_name)}
+    exam_date = None
+    total_marks = None
+    rows = []
+    for st in roster:
+        m = marks.get(st["student_user_id"])
+        if m:
+            exam_date = exam_date or m.get("exam_date")
+            total_marks = total_marks if total_marks is not None else m.get("total_marks")
+        rows.append({
+            "student_user_id": st["student_user_id"],
+            "name": st["name"],
+            "enrollment_no": st.get("enrollment_no"),
+            "email": st.get("email"),
+            "result_id": m.get("id") if m else None,
+            "total_marks": m.get("total_marks") if m else None,
+            "obtained_marks": m.get("obtained_marks") if m else None,
+        })
+    return jsonify(exam_name=exam_name, exam_date=exam_date, total_marks=total_marks, rows=rows)
+
+
+@app.post("/api/subjects/<int:subject_id>/results")
+def save_subject_results(subject_id: int):
+    """Upsert a whole marks sheet for one exam."""
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    payload = request.get_json(force=True) or {}
+    exam_name = (payload.get("exam_name") or "").strip()
+    if not exam_name:
+        return jsonify(error="Exam name is required"), 400
+    exam_date = payload.get("exam_date") or None
+    default_total = payload.get("total_marks")
+    saved = 0
+    for row in payload.get("marks", []):
+        suid = row.get("student_user_id")
+        if suid is None:
+            continue
+        obtained = row.get("obtained_marks")
+        if obtained in ("", None):
+            continue  # skip ungraded students
+        total = row.get("total_marks")
+        total = total if total not in ("", None) else default_total
+        models.upsert_result(subject_id, int(suid), exam_name, exam_date,
+                             _num(total), _num(obtained))
+        saved += 1
+    return jsonify(saved=saved), 201
+
+
+@app.delete("/api/subjects/<int:subject_id>/results")
+def delete_subject_exam(subject_id: int):
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    exam_name = request.args.get("exam_name")
+    if not exam_name:
+        return jsonify(error="exam_name is required"), 400
+    models.delete_exam(subject_id, exam_name)
+    return jsonify(success=True)
+
+
+@app.get("/api/student/results")
+def student_results():
+    """The signed-in student's own marks across all subjects (read-only)."""
+    user = get_auth_user()
+    if not user:
+        return jsonify(error="Unauthorized"), 401
+    return jsonify(models.list_results_for_student(user["id"]))
+
+
+def _num(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _selected_date():

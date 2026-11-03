@@ -73,6 +73,45 @@ def add_embedding(student_id: int, embedding: np.ndarray) -> None:
         )
 
 
+def clear_embeddings(student_id: int) -> None:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM face_embeddings WHERE student_id = ?", (student_id,))
+
+
+def update_student_identity(student_id: int, enrollment_no: str, name: str) -> None:
+    with get_connection() as conn:
+        conn.execute("UPDATE students SET enrollment_no = ?, name = ? WHERE id = ?",
+                     (enrollment_no, name, student_id))
+
+
+def set_student_photo(student_id: int, jpeg_bytes: bytes) -> None:
+    with get_connection() as conn:
+        conn.execute("UPDATE students SET photo = ? WHERE id = ?",
+                     (sqlite3.Binary(jpeg_bytes), student_id))
+
+
+def get_student_photo(student_id: int) -> str | None:
+    import base64
+    with get_connection() as conn:
+        row = conn.execute("SELECT photo FROM students WHERE id = ?", (student_id,)).fetchone()
+    if not row or row["photo"] is None:
+        return None
+    return "data:image/jpeg;base64," + base64.b64encode(bytes(row["photo"])).decode("ascii")
+
+
+def face_roster_for_subject(subject_id: int) -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT st.id AS student_id, st.name, st.enrollment_no
+               FROM students st
+               JOIN enrollments e ON e.student_user_id = st.user_id
+               WHERE e.subject_id = ? AND e.status = 'approved'
+               ORDER BY st.name""",
+            (subject_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def list_students() -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute("SELECT id, enrollment_no, name, class_section FROM students").fetchall()
@@ -335,6 +374,7 @@ def delete_subject(subject_id: int, faculty_id: int) -> bool:
         conn.execute("DELETE FROM attendance_sessions WHERE subject_id = ?", (subject_id,))
         conn.execute("DELETE FROM enrollments WHERE subject_id = ?", (subject_id,))
         conn.execute("DELETE FROM scheduled_classes WHERE subject_id = ?", (subject_id,))
+        conn.execute("DELETE FROM results WHERE subject_id = ?", (subject_id,))
         conn.execute("DELETE FROM subjects WHERE id = ?", (subject_id,))
         return True
 
@@ -511,14 +551,133 @@ def open_self_mark_sessions_for_student(student_user_id: int) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Student directory (faculty) + exam results
+# ---------------------------------------------------------------------------
+
+def list_students_for_faculty(faculty_id: int) -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT u.id AS uid, u.name, u.email,
+                      MAX(st.enrollment_no) AS enrollment_no,
+                      MAX(sub.section) AS section,
+                      COUNT(DISTINCT e.subject_id) AS subject_count
+               FROM enrollments e
+               JOIN users u ON u.id = e.student_user_id
+               JOIN subjects sub ON sub.id = e.subject_id
+               LEFT JOIN students st ON st.user_id = u.id
+               WHERE sub.faculty_id = ? AND e.status = 'approved'
+               GROUP BY u.id, u.name, u.email
+               ORDER BY u.name""",
+            (faculty_id,),
+        ).fetchall()
+        return [
+            {"student_user_id": r["uid"], "name": r["name"], "email": r["email"],
+             "enrollment_no": r["enrollment_no"], "section": r["section"],
+             "subject_count": r["subject_count"]}
+            for r in rows
+        ]
+
+
+def results_roster(subject_id: int) -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT u.id AS uid, u.name, u.email, st.enrollment_no
+               FROM enrollments e
+               JOIN users u ON u.id = e.student_user_id
+               LEFT JOIN students st ON st.user_id = u.id
+               WHERE e.subject_id = ? AND e.status = 'approved'
+               ORDER BY u.name""",
+            (subject_id,),
+        ).fetchall()
+        return [
+            {"student_user_id": r["uid"], "name": r["name"], "email": r["email"],
+             "enrollment_no": r["enrollment_no"]}
+            for r in rows
+        ]
+
+
+def list_exams_for_subject(subject_id: int) -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT exam_name, MAX(exam_date) AS exam_date,
+                      MAX(total_marks) AS total_marks, COUNT(*) AS graded
+               FROM results WHERE subject_id = ?
+               GROUP BY exam_name ORDER BY MAX(exam_date) DESC, exam_name""",
+            (subject_id,),
+        ).fetchall()
+        return [
+            {"exam_name": r["exam_name"], "exam_date": r["exam_date"],
+             "total_marks": r["total_marks"], "graded": r["graded"]}
+            for r in rows
+        ]
+
+
+def results_for_exam(subject_id: int, exam_name: str) -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT id, student_user_id, exam_date, total_marks, obtained_marks
+               FROM results WHERE subject_id = ? AND exam_name = ?""",
+            (subject_id, exam_name),
+        ).fetchall()
+        return [
+            {"id": r["id"], "student_user_id": r["student_user_id"],
+             "exam_date": r["exam_date"], "total_marks": r["total_marks"],
+             "obtained_marks": r["obtained_marks"]}
+            for r in rows
+        ]
+
+
+def upsert_result(subject_id: int, student_user_id: int, exam_name: str,
+                  exam_date, total_marks, obtained_marks) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            """INSERT INTO results
+                 (subject_id, student_user_id, exam_name, exam_date, total_marks, obtained_marks)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT (subject_id, student_user_id, exam_name)
+               DO UPDATE SET exam_date = excluded.exam_date,
+                             total_marks = excluded.total_marks,
+                             obtained_marks = excluded.obtained_marks,
+                             updated_at = datetime('now')""",
+            (subject_id, student_user_id, exam_name, exam_date, total_marks, obtained_marks),
+        )
+
+
+def delete_exam(subject_id: int, exam_name: str) -> None:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM results WHERE subject_id = ? AND exam_name = ?",
+                     (subject_id, exam_name))
+
+
+def list_results_for_student(student_user_id: int) -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT r.id, sub.name AS subject_name, sub.code AS subject_code,
+                      r.exam_name, r.exam_date, r.total_marks, r.obtained_marks
+               FROM results r JOIN subjects sub ON sub.id = r.subject_id
+               WHERE r.student_user_id = ?
+               ORDER BY r.exam_date DESC, sub.name""",
+            (student_user_id,),
+        ).fetchall()
+        return [
+            {"id": r["id"], "subject_name": r["subject_name"], "subject_code": r["subject_code"],
+             "exam_name": r["exam_name"], "exam_date": r["exam_date"],
+             "total_marks": r["total_marks"], "obtained_marks": r["obtained_marks"]}
+            for r in rows
+        ]
+
+
+# ---------------------------------------------------------------------------
 # Attendance sessions
 # ---------------------------------------------------------------------------
 
 def create_attendance_session(subject_id: int, faculty_id: int, method: str = "live",
                               duration_minutes: int | None = None,
-                              allow_self_mark: bool = True) -> dict:
+                              allow_self_mark: bool = True,
+                              session_date=None) -> dict:
     from datetime import timedelta
-    session_date = date.today().isoformat()
+    session_date = (session_date.isoformat() if hasattr(session_date, "isoformat")
+                    else session_date) or date.today().isoformat()
     start_time = datetime.now().strftime("%H:%M:%S")
     open_until = (datetime.now() + timedelta(minutes=duration_minutes)).isoformat() if duration_minutes else None
     with get_connection() as conn:

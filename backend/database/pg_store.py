@@ -132,6 +132,19 @@ CREATE TABLE IF NOT EXISTS scheduled_classes (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE(faculty_id, course_code, section, day_of_week, start_time)
 );
+
+CREATE TABLE IF NOT EXISTS results (
+    id SERIAL PRIMARY KEY,
+    subject_id INTEGER NOT NULL REFERENCES subjects(id),
+    student_user_id INTEGER NOT NULL REFERENCES users(id),
+    exam_name TEXT NOT NULL,
+    exam_date DATE,
+    total_marks REAL,
+    obtained_marks REAL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(subject_id, student_user_id, exam_name)
+);
 """
 
 _pool: ConnectionPool | None = None
@@ -160,6 +173,7 @@ def init_db() -> None:
         conn.execute(SCHEMA)
         # Safe migration for existing tables
         _safe_add_column(conn, "students", "user_id", "INTEGER REFERENCES users(id)")
+        _safe_add_column(conn, "students", "photo", "BYTEA")
         _safe_add_column(conn, "attendance", "session_id", "INTEGER REFERENCES attendance_sessions(id)")
         _safe_add_column(conn, "attendance", "manually_set", "BOOLEAN NOT NULL DEFAULT FALSE")
         _safe_add_column(conn, "attendance_sessions", "open_until", "TIMESTAMPTZ")
@@ -242,6 +256,47 @@ def add_embedding(student_id: int, embedding: np.ndarray) -> None:
             "INSERT INTO face_embeddings (student_id, embedding) VALUES (%s, %s)",
             (student_id, json.dumps(embedding.tolist())),
         )
+
+
+def clear_embeddings(student_id: int) -> None:
+    with _get_pool().connection() as conn:
+        conn.execute("DELETE FROM face_embeddings WHERE student_id = %s", (student_id,))
+
+
+def update_student_identity(student_id: int, enrollment_no: str, name: str) -> None:
+    with _get_pool().connection() as conn:
+        conn.execute("UPDATE students SET enrollment_no = %s, name = %s WHERE id = %s",
+                     (enrollment_no, name, student_id))
+
+
+def set_student_photo(student_id: int, jpeg_bytes: bytes) -> None:
+    with _get_pool().connection() as conn:
+        conn.execute("UPDATE students SET photo = %s WHERE id = %s", (jpeg_bytes, student_id))
+
+
+def get_student_photo(student_id: int) -> str | None:
+    """Return the stored face thumbnail as a data URL, or None."""
+    with _get_pool().connection() as conn:
+        r = conn.execute("SELECT photo FROM students WHERE id = %s", (student_id,)).fetchone()
+    if not r or r[0] is None:
+        return None
+    raw = bytes(r[0])
+    return "data:image/jpeg;base64," + base64.b64encode(raw).decode("ascii")
+
+
+def face_roster_for_subject(subject_id: int) -> list[dict]:
+    """Approved, face-registered students of a subject (students.id level) —
+    used to build a full present/absent attendance sheet."""
+    with _get_pool().connection() as conn:
+        rows = conn.execute(
+            """SELECT st.id, st.name, st.enrollment_no
+               FROM students st
+               JOIN enrollments e ON e.student_user_id = st.user_id
+               WHERE e.subject_id = %s AND e.status = 'approved'
+               ORDER BY st.name""",
+            (subject_id,),
+        ).fetchall()
+        return [{"student_id": r[0], "name": r[1], "enrollment_no": r[2]} for r in rows]
 
 
 def list_students() -> list[dict]:
@@ -526,6 +581,7 @@ def delete_subject(subject_id: int, faculty_id: int) -> bool:
         conn.execute("DELETE FROM attendance_sessions WHERE subject_id = %s", (subject_id,))
         conn.execute("DELETE FROM enrollments WHERE subject_id = %s", (subject_id,))
         conn.execute("DELETE FROM scheduled_classes WHERE subject_id = %s", (subject_id,))
+        conn.execute("DELETE FROM results WHERE subject_id = %s", (subject_id,))
         conn.execute("DELETE FROM subjects WHERE id = %s", (subject_id,))
         return True
 
@@ -685,13 +741,131 @@ def open_self_mark_sessions_for_student(student_user_id: int) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Student directory (faculty) + exam results
+# ---------------------------------------------------------------------------
+
+def list_students_for_faculty(faculty_id: int) -> list[dict]:
+    """Every distinct student enrolled (approved) in any of the faculty's
+    subjects, with the enrollment number from their face profile if linked."""
+    with _get_pool().connection() as conn:
+        rows = conn.execute(
+            """SELECT u.id, u.name, u.email,
+                      MAX(st.enrollment_no) AS enrollment_no,
+                      MAX(sub.section) AS section,
+                      COUNT(DISTINCT e.subject_id) AS subject_count
+               FROM enrollments e
+               JOIN users u ON u.id = e.student_user_id
+               JOIN subjects sub ON sub.id = e.subject_id
+               LEFT JOIN students st ON st.user_id = u.id
+               WHERE sub.faculty_id = %s AND e.status = 'approved'
+               GROUP BY u.id, u.name, u.email
+               ORDER BY u.name""",
+            (faculty_id,),
+        ).fetchall()
+        return [
+            {"student_user_id": r[0], "name": r[1], "email": r[2],
+             "enrollment_no": r[3], "section": r[4], "subject_count": r[5]}
+            for r in rows
+        ]
+
+
+def results_roster(subject_id: int) -> list[dict]:
+    """Approved students for a subject (for building a marks sheet)."""
+    with _get_pool().connection() as conn:
+        rows = conn.execute(
+            """SELECT u.id, u.name, u.email, st.enrollment_no
+               FROM enrollments e
+               JOIN users u ON u.id = e.student_user_id
+               LEFT JOIN students st ON st.user_id = u.id
+               WHERE e.subject_id = %s AND e.status = 'approved'
+               ORDER BY u.name""",
+            (subject_id,),
+        ).fetchall()
+        return [
+            {"student_user_id": r[0], "name": r[1], "email": r[2], "enrollment_no": r[3]}
+            for r in rows
+        ]
+
+
+def list_exams_for_subject(subject_id: int) -> list[dict]:
+    with _get_pool().connection() as conn:
+        rows = conn.execute(
+            """SELECT exam_name, MAX(exam_date) AS exam_date,
+                      MAX(total_marks) AS total_marks, COUNT(*) AS graded
+               FROM results WHERE subject_id = %s
+               GROUP BY exam_name ORDER BY MAX(exam_date) DESC NULLS LAST, exam_name""",
+            (subject_id,),
+        ).fetchall()
+        return [
+            {"exam_name": r[0], "exam_date": str(r[1]) if r[1] else None,
+             "total_marks": r[2], "graded": r[3]}
+            for r in rows
+        ]
+
+
+def results_for_exam(subject_id: int, exam_name: str) -> list[dict]:
+    with _get_pool().connection() as conn:
+        rows = conn.execute(
+            """SELECT id, student_user_id, exam_date, total_marks, obtained_marks
+               FROM results WHERE subject_id = %s AND exam_name = %s""",
+            (subject_id, exam_name),
+        ).fetchall()
+        return [
+            {"id": r[0], "student_user_id": r[1], "exam_date": str(r[2]) if r[2] else None,
+             "total_marks": r[3], "obtained_marks": r[4]}
+            for r in rows
+        ]
+
+
+def upsert_result(subject_id: int, student_user_id: int, exam_name: str,
+                  exam_date, total_marks, obtained_marks) -> None:
+    with _get_pool().connection() as conn:
+        conn.execute(
+            """INSERT INTO results
+                 (subject_id, student_user_id, exam_name, exam_date, total_marks, obtained_marks)
+               VALUES (%s, %s, %s, %s, %s, %s)
+               ON CONFLICT (subject_id, student_user_id, exam_name)
+               DO UPDATE SET exam_date = EXCLUDED.exam_date,
+                             total_marks = EXCLUDED.total_marks,
+                             obtained_marks = EXCLUDED.obtained_marks,
+                             updated_at = now()""",
+            (subject_id, student_user_id, exam_name, exam_date, total_marks, obtained_marks),
+        )
+
+
+def delete_exam(subject_id: int, exam_name: str) -> None:
+    with _get_pool().connection() as conn:
+        conn.execute("DELETE FROM results WHERE subject_id = %s AND exam_name = %s",
+                     (subject_id, exam_name))
+
+
+def list_results_for_student(student_user_id: int) -> list[dict]:
+    with _get_pool().connection() as conn:
+        rows = conn.execute(
+            """SELECT r.id, sub.name, sub.code, r.exam_name, r.exam_date,
+                      r.total_marks, r.obtained_marks
+               FROM results r JOIN subjects sub ON sub.id = r.subject_id
+               WHERE r.student_user_id = %s
+               ORDER BY r.exam_date DESC NULLS LAST, sub.name""",
+            (student_user_id,),
+        ).fetchall()
+        return [
+            {"id": r[0], "subject_name": r[1], "subject_code": r[2],
+             "exam_name": r[3], "exam_date": str(r[4]) if r[4] else None,
+             "total_marks": r[5], "obtained_marks": r[6]}
+            for r in rows
+        ]
+
+
+# ---------------------------------------------------------------------------
 # Attendance sessions
 # ---------------------------------------------------------------------------
 
 def create_attendance_session(subject_id: int, faculty_id: int, method: str = "live",
                               duration_minutes: int | None = None,
-                              allow_self_mark: bool = True) -> dict:
-    session_date = date.today()
+                              allow_self_mark: bool = True,
+                              session_date: date | None = None) -> dict:
+    session_date = session_date or date.today()
     start_time = datetime.now().strftime("%H:%M:%S")
     open_until = datetime.now(timezone.utc) + timedelta(minutes=duration_minutes) if duration_minutes else None
     with _get_pool().connection() as conn:

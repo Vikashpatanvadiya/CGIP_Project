@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-export function useCamera() {
+export function useCamera(enabled = true) {
   const videoRef = useRef(null)
   const canvasRef = useRef(document.createElement('canvas'))
   const streamRef = useRef(null)
@@ -12,6 +12,14 @@ export function useCamera() {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
+    if (!enabled) {
+      // Make sure any previously-open stream is released when disabled.
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+      setReady(false)
+      return
+    }
+
     let cancelled = false
 
     navigator.mediaDevices
@@ -33,7 +41,7 @@ export function useCamera() {
       cancelled = true
       streamRef.current?.getTracks().forEach((track) => track.stop())
     }
-  }, [])
+  }, [enabled])
 
   const captureFrame = useCallback(() => {
     const video = videoRef.current

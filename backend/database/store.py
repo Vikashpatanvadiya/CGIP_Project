@@ -34,6 +34,11 @@ get_user_by_id = _backend.get_user_by_id
 # ---------------------------------------------------------------------------
 create_student = _backend.create_student
 add_embedding = _backend.add_embedding
+clear_embeddings = _backend.clear_embeddings
+update_student_identity = _backend.update_student_identity
+set_student_photo = _backend.set_student_photo
+get_student_photo = _backend.get_student_photo
+face_roster_for_subject = _backend.face_roster_for_subject
 list_students = _backend.list_students
 get_student = _backend.get_student
 get_student_by_user_id = _backend.get_student_by_user_id
@@ -72,6 +77,17 @@ list_enrollments_for_subject = _backend.list_enrollments_for_subject
 list_enrollments_for_student = _backend.list_enrollments_for_student
 approved_student_ids_for_subject = _backend.approved_student_ids_for_subject
 open_self_mark_sessions_for_student = _backend.open_self_mark_sessions_for_student
+
+# ---------------------------------------------------------------------------
+# Student directory + exam results
+# ---------------------------------------------------------------------------
+list_students_for_faculty = _backend.list_students_for_faculty
+results_roster = _backend.results_roster
+list_exams_for_subject = _backend.list_exams_for_subject
+results_for_exam = _backend.results_for_exam
+upsert_result = _backend.upsert_result
+delete_exam = _backend.delete_exam
+list_results_for_student = _backend.list_results_for_student
 
 # ---------------------------------------------------------------------------
 # Attendance sessions

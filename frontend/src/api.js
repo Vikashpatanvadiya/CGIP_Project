@@ -152,10 +152,10 @@ export async function rejectEnrollment(id) {
 // Sessions (Faculty) API
 // ==========================================
 
-export async function createSession(subjectId, { method, duration_minutes, allow_self_mark } = {}) {
+export async function createSession(subjectId, { method, duration_minutes, allow_self_mark, session_date } = {}) {
   const res = await request(`/subjects/${subjectId}/sessions`, {
     method: 'POST',
-    body: JSON.stringify({ method, duration_minutes, allow_self_mark }),
+    body: JSON.stringify({ method, duration_minutes, allow_self_mark, session_date }),
   })
   return res.json()
 }
@@ -212,6 +212,11 @@ export async function getSessionPhotos(sessionId) {
   return res.json()
 }
 
+export async function getSessionSheet(sessionId) {
+  const res = await request(`/sessions/${sessionId}/sheet`)
+  return res.json()
+}
+
 // ==========================================
 // Student API
 // ==========================================
@@ -232,6 +237,11 @@ export async function registerStudentFace({ enrollment_no, name, images }) {
     method: 'POST',
     body: JSON.stringify({ enrollment_no, name, images }),
   })
+  return res.json()
+}
+
+export async function getStudentFace() {
+  const res = await request('/student/face')
   return res.json()
 }
 
@@ -279,6 +289,56 @@ export async function getStudentToday(date) {
 
 export async function getStudentOpenSessions() {
   const res = await request('/student/open-sessions')
+  return res.json()
+}
+
+// ==========================================
+// Student directory, attendance overview & results API
+// ==========================================
+
+export async function getFacultyStudents() {
+  const res = await request('/faculty/students')
+  return res.json()
+}
+
+export async function getAttendanceOverview() {
+  const res = await request('/faculty/attendance')
+  return res.json()
+}
+
+export async function getSessionDetail(sessionId) {
+  const res = await request(`/sessions/${sessionId}/detail`)
+  return res.json()
+}
+
+export async function getSubjectResults(subjectId, examName) {
+  const q = examName ? `?exam_name=${encodeURIComponent(examName)}` : ''
+  const res = await request(`/subjects/${subjectId}/results${q}`)
+  return res.json()
+}
+
+export async function saveSubjectResults(subjectId, { exam_name, exam_date, total_marks, marks }) {
+  const res = await request(`/subjects/${subjectId}/results`, {
+    method: 'POST',
+    body: JSON.stringify({ exam_name, exam_date, total_marks, marks }),
+  })
+  return res.json()
+}
+
+export async function deleteSubjectExam(subjectId, examName) {
+  const res = await request(`/subjects/${subjectId}/results?exam_name=${encodeURIComponent(examName)}`, {
+    method: 'DELETE',
+  })
+  return res.json()
+}
+
+export async function getStudentResults() {
+  const res = await request('/student/results')
+  return res.json()
+}
+
+export async function getStudentTimetable() {
+  const res = await request('/student/timetable')
   return res.json()
 }
 

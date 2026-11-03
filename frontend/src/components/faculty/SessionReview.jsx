@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { finalizeSession, getSession, getSessionAttendance, getSessionPhotos } from '../../api'
+import { finalizeSession, getSession, getSessionSheet, getSessionPhotos } from '../../api'
 
 export default function SessionReview({ sessionId, session, subjectId, subject, navigate }) {
   const [attendanceRecords, setAttendanceRecords] = useState([])
@@ -19,7 +19,7 @@ export default function SessionReview({ sessionId, session, subjectId, subject, 
     setError(null)
     try {
       const [records, sess, photoList] = await Promise.all([
-        getSessionAttendance(sessionId).catch(() => []),
+        getSessionSheet(sessionId).catch(() => []),
         getSession(sessionId).catch(() => session),
         getSessionPhotos(sessionId).catch(() => []),
       ])

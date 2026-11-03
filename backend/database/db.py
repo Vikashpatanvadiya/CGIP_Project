@@ -170,6 +170,7 @@ def _migrate_attendance_constraint(conn) -> None:
 def _migrate_students_user_id(conn) -> None:
     """Add user_id column to students table if not present."""
     _safe_add_column(conn, "students", "user_id", "INTEGER")
+    _safe_add_column(conn, "students", "photo", "BLOB")
     _safe_add_column(conn, "attendance_sessions", "open_until", "TEXT")
     _safe_add_column(conn, "attendance_sessions", "allow_self_mark", "INTEGER", default=1)
 
@@ -235,5 +236,18 @@ def init_db() -> None:
                 faculty_name TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 UNIQUE(faculty_id, course_code, section, day_of_week, start_time)
+            );
+
+            CREATE TABLE IF NOT EXISTS results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                subject_id INTEGER NOT NULL REFERENCES subjects(id),
+                student_user_id INTEGER NOT NULL REFERENCES users(id),
+                exam_name TEXT NOT NULL,
+                exam_date TEXT,
+                total_marks REAL,
+                obtained_marks REAL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(subject_id, student_user_id, exam_name)
             );
         """)

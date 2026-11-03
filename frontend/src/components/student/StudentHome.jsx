@@ -10,7 +10,7 @@ function to12h(t) {
   return `${h12}:${m} ${ampm}`
 }
 
-export default function StudentHome({ user, navigate }) {
+export default function StudentHome({ user, navigate, date }) {
   const [subjects, setSubjects] = useState([])
   const [today, setToday] = useState(null)
   const [openSessions, setOpenSessions] = useState([])
@@ -26,7 +26,7 @@ export default function StudentHome({ user, navigate }) {
       const [subjectsData, notifData, todayData, openData] = await Promise.all([
         getStudentSubjects().catch(() => []),
         getNotifications().catch(() => []),
-        getStudentToday().catch(() => null),
+        getStudentToday(date).catch(() => null),
         getStudentOpenSessions().catch(() => null),
       ])
 
@@ -41,7 +41,7 @@ export default function StudentHome({ user, navigate }) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [date])
 
   useEffect(() => {
     loadDashboard()
