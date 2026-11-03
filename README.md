@@ -31,12 +31,16 @@ Camera Feed → Preprocessing (grayscale, Gaussian blur, histogram equalization)
             → Output Attendance Report (CSV / Excel)
 ```
 
-- **Frontend**: React + Tailwind CSS (`frontend/`) — live recognition view, student
-  registration, attendance reports.
+- **Frontend**: React + Tailwind CSS (`frontend/`) — live recognition, **group-photo
+  attendance**, student registration, attendance reports.
 - **Backend**: Python + Flask REST API (`backend/`) — face detection, feature
   extraction, matching, and attendance logic.
-- **Database**: SQLite (`data/attendance.db`, created on first run) — students,
-  face embeddings, attendance records.
+- **Recognition**: **ArcFace** deep embeddings + SCRFD detector (InsightFace) for
+  accurate, multi-face recognition; the from-scratch **LBP** classical pipeline is
+  kept as the documented baseline (see `docs/image_processing_concepts.md`).
+- **Database**: **Supabase (Postgres)** when a `.env` is configured — a shared cloud
+  DB so students register once and all teammates see the same data; automatically
+  falls back to local **SQLite** otherwise. See `.env.example`.
 
 ## Project layout
 
@@ -77,16 +81,34 @@ Topics/                         Class LAB/Tutorial materials referenced above
 python3 -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python3 -m backend.app          # http://127.0.0.1:5050
+# IMPORTANT one-time cv2 fix: insightface pulls opencv-python, which collides
+# with opencv-contrib-python. Run these once after install:
+pip uninstall -y opencv-python
+pip install --force-reinstall --no-deps opencv-contrib-python==4.14.0.94
+./run-backend.sh                # http://127.0.0.1:5050  (macOS/Linux)
 ```
-> macOS note: the server runs on port **5050**, not 5000 — macOS's AirPlay
-> Receiver squats on port 5000 and will silently 403 your requests.
+On Windows (no helper script): `python -m backend.app`.
 
-**Frontend**
+> **First run downloads the face model** (~330MB `buffalo_l` from InsightFace)
+> to `~/.insightface/` — needs internet once, then it's cached.
+>
+> **Cloud database (optional):** copy `.env.example` to `.env` and fill in your
+> Supabase URL + connection string to share one database across all three
+> laptops. Without `.env` it uses a local SQLite file.
+
+> **macOS notes:**
+> - The server runs on port **5050**, not 5000 — macOS's AirPlay Receiver
+>   squats on port 5000 and will silently 403 your requests.
+> - `run-backend.sh` points Python at Homebrew's `expat` so Excel export works
+>   on Homebrew Python 3.14.x (the system libexpat is missing a symbol
+>   `openpyxl` needs). If you ever see a `pyexpat` / `libexpat` import error,
+>   run `brew install expat` once. CSV export works regardless.
+
+**Frontend** (separate terminal)
 ```bash
 cd frontend
 npm install
-npm run dev                     # http://localhost:5173
+./../run-frontend.sh            # or: npm run dev  → http://localhost:5173
 ```
 
 **Tests**

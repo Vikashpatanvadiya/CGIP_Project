@@ -2,11 +2,17 @@
 Module Owner: Vikas Patanwadiya (24000605) — Feature Extraction & Recognition Module
                                               (with Maitra Prajapati on LBP extraction)
 
-Turns a face crop into a feature vector (see lbp.py) and matches it against the
-enrolled students' stored vectors using distance-based k-NN, per the project
-document's "Algorithms and Techniques" section:
-  - Euclidean distance / Cosine similarity for comparing embeddings
-  - k-Nearest Neighbours for classifying the closest identity
+Matches a face embedding against the enrolled students' stored embeddings using
+cosine similarity + k-Nearest-Neighbours, per the project doc's "Algorithms and
+Techniques" section (Euclidean distance / Cosine similarity, k-NN).
+
+Two embedding sources exist in the codebase:
+  - ArcFace (deep)      — face_engine.py, 512-d, used for live/production matching.
+  - LBP histogram (classical, from scratch) — extract_lbp_embedding() below,
+    kept as the course baseline and still unit-tested. See lbp.py / pixel_ops.py.
+
+The matching math (match_embedding) is identical for both; only the threshold
+differs, because the two embedding spaces have different similarity scales.
 """
 
 from dataclasses import dataclass
@@ -16,48 +22,65 @@ import numpy as np
 from backend.vision.lbp import lbp_histogram
 from backend.vision.pixel_ops import preprocess_face
 
-# Below this similarity the closest match is still rejected as "Unknown" —
-# required so a stranger's face isn't force-matched to the nearest student.
-MATCH_THRESHOLD = 0.45
+# ArcFace cosine similarity: same identity typically lands ~0.45-0.8, different
+# identities ~0.0-0.3. 0.38 sits in the margin — high enough to reject
+# strangers, low enough to accept the same person across angles/lighting.
+ARCFACE_MATCH_THRESHOLD = 0.38
+
+# LBP cosine similarity lives on a different (narrower) scale — retained for the
+# classical baseline path only.
+LBP_MATCH_THRESHOLD = 0.65
+
 K_NEIGHBORS = 3
 
 
 @dataclass
 class MatchResult:
     student_id: int | None
-    confidence: float  # 0..1, higher is more confident
+    confidence: float  # cosine similarity of the winning identity
     is_match: bool
 
 
-def extract_embedding(face_bgr: np.ndarray) -> np.ndarray:
-    """Preprocess a face crop and extract its LBP-histogram feature vector."""
+def extract_lbp_embedding(face_bgr: np.ndarray) -> np.ndarray:
+    """Classical baseline: preprocess a face crop (grayscale, Gaussian blur,
+    histogram equalization) and extract its from-scratch LBP-histogram feature
+    vector. Not used for live matching anymore, but kept and tested as the
+    course technique we benchmark ArcFace against.
+    """
     gray = preprocess_face(face_bgr)
     return lbp_histogram(gray)
 
 
-def _euclidean_similarity(a: np.ndarray, b: np.ndarray) -> float:
-    """Convert Euclidean distance between two normalized histograms into a
-    0..1 similarity score (1 = identical, 0 = maximally different).
+def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    """Cosine similarity between two embedding vectors. ArcFace embeddings are
+    already L2-normalized, so this reduces to a dot product for them; for LBP
+    histograms it normalizes by the magnitudes.
     """
-    distance = float(np.linalg.norm(a - b))
-    max_distance = np.sqrt(2.0)  # both vectors are L1-normalized per cell, bounded
-    return max(0.0, 1.0 - distance / max_distance)
+    if a.shape != b.shape:
+        # Different embedding types (e.g. a stale LBP vector vs an ArcFace one)
+        # — not comparable, so treat as no similarity rather than crashing.
+        return 0.0
+    denom = float(np.linalg.norm(a) * np.linalg.norm(b))
+    if denom == 0.0:
+        return 0.0
+    return float(np.dot(a, b) / denom)
 
 
 def match_embedding(
     query: np.ndarray,
     known_embeddings: list[tuple[int, np.ndarray]],
     k: int = K_NEIGHBORS,
-    threshold: float = MATCH_THRESHOLD,
+    threshold: float = ARCFACE_MATCH_THRESHOLD,
 ) -> MatchResult:
-    """k-NN match: score the query against every enrolled sample, take the
-    k closest samples, and vote by majority student_id among them.
+    """k-NN match: score the query against every enrolled sample, take the k
+    most similar, and majority-vote the student_id among them. The winning
+    confidence is the mean similarity of that student's votes.
     """
     if not known_embeddings:
         return MatchResult(student_id=None, confidence=0.0, is_match=False)
 
     scored = [
-        (student_id, _euclidean_similarity(query, emb))
+        (student_id, _cosine_similarity(query, emb))
         for student_id, emb in known_embeddings
     ]
     scored.sort(key=lambda pair: pair[1], reverse=True)

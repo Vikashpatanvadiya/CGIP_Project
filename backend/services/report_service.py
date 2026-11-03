@@ -10,9 +10,13 @@ import csv
 import io
 from datetime import date
 
-from openpyxl import Workbook
+from backend.database import store as models
 
-from backend.database import models
+# NOTE: openpyxl is imported lazily inside export_xlsx(), not at module load.
+# openpyxl parses XML on import, which pulls in CPython's pyexpat; on some
+# Homebrew Python builds pyexpat fails to load (libexpat symbol mismatch).
+# Keeping the import lazy means the whole backend (live recognition, CSV
+# export, everything) still boots even when xlsx export is unavailable.
 
 
 def export_csv(session_date: date | None = None) -> str:
@@ -29,6 +33,8 @@ def export_csv(session_date: date | None = None) -> str:
 
 
 def export_xlsx(session_date: date | None = None) -> bytes:
+    from openpyxl import Workbook  # lazy: see module-level note
+
     rows = models.attendance_for_date(session_date)
     wb = Workbook()
     ws = wb.active

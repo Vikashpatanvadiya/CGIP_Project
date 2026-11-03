@@ -10,11 +10,15 @@ cd frontend && npm install && cd ..
 
 ## Running the system
 
-1. Start the backend: `source .venv/bin/activate && python3 -m backend.app`
+1. Start the backend (terminal 1): `./run-backend.sh`
    (serves the API at `http://127.0.0.1:5050`).
-2. Start the frontend: `cd frontend && npm run dev` (opens at
-   `http://localhost:5173`).
+2. Start the frontend (terminal 2): `./run-frontend.sh`
+   (opens at `http://localhost:5173`).
 3. Open `http://localhost:5173` in a browser on the machine with the webcam.
+
+> Both processes must be running at the same time. If the frontend shows
+> "Request failed: 502", the backend isn't running — start it with
+> `./run-backend.sh`.
 
 ## Registering a student
 
@@ -47,3 +51,7 @@ Excel** to download that day's attendance.
   5050; the backend intentionally avoids port 5000 (AirPlay Receiver).
 - **"No face could be detected"** during registration: retake the sample with
   better lighting and the face facing the camera.
+- **`pyexpat` / `libexpat` error when starting the backend** (Homebrew Python
+  3.14.x on macOS): run `brew install expat` once, then start with
+  `./run-backend.sh` (it points Python at Homebrew's expat). This only affects
+  Excel export; CSV export works without it.

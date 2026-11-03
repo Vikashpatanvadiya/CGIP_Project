@@ -4,3 +4,17 @@ opencv-contrib-python==4.14.0.94
 numpy==2.5.3
 openpyxl==3.1.5
 pytest==8.3.4
+
+# Deep face recognition (ArcFace + SCRFD detector). insightface pulls in
+# onnxruntime, onnx, scikit-image, scipy. NOTE: insightface also depends on
+# opencv-python, which collides with opencv-contrib-python (both own the cv2/
+# folder). After install, run:  pip uninstall -y opencv-python
+# then: pip install --force-reinstall --no-deps opencv-contrib-python==4.14.0.94
+insightface==2.1
+onnxruntime==1.30.0
+
+# Supabase / Postgres cloud database (optional — falls back to SQLite if no
+# .env is present). See .env.example.
+psycopg[binary]==3.3.6
+psycopg-pool==3.2.4
+python-dotenv==1.0.1
