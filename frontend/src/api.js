@@ -1,7 +1,10 @@
 // Module Owner: Krishna Patel (24000131) — Database & GUI
 // Thin wrapper around the Flask REST API (see backend/app.py).
 
-const BASE_URL = '/api'
+// In dev, Vite proxies '/api' to the local Flask server (see vite.config.js).
+// In production (Vercel/Netlify), set VITE_API_URL to the backend's public API
+// base, e.g. https://your-space.hf.space/api
+const BASE_URL = import.meta.env.VITE_API_URL || '/api'
 const TOKEN_KEY = 'auth_token'
 
 export function getToken() {

@@ -1,0 +1,18 @@
+# Never bake secrets or local data into the image.
+.env
+.env.*
+data/
+*.db
+
+# Local/dev cruft
+.venv/
+**/__pycache__/
+*.pyc
+.git/
+*.log
+.DS_Store
+tmp/
+
+# Frontend is deployed separately (Vercel/Netlify) — not needed in the backend image.
+frontend/node_modules/
+frontend/dist/
