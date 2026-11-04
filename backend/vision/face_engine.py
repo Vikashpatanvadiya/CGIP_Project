@@ -23,6 +23,7 @@ texture, which is too easily confused between similar faces/lighting.
 The model loads once (lazily) and is reused for every frame.
 """
 
+import os
 import threading
 from dataclasses import dataclass
 
@@ -30,8 +31,11 @@ import numpy as np
 
 # One SCRFD+ArcFace model instance, shared across requests. buffalo_l bundles
 # the SCRFD-10g detector and the w600k_r50 ArcFace recognizer.
-_MODEL_NAME = "buffalo_l"
-_DET_SIZE = (640, 640)
+# Both are overridable by env so a hosted server can trade a little accuracy for
+# speed/memory (e.g. DET_SIZE=320) without touching code.
+_MODEL_NAME = os.environ.get("FACE_MODEL", "buffalo_l")
+_det = int(os.environ.get("DET_SIZE", "640"))
+_DET_SIZE = (_det, _det)
 
 _app = None
 _lock = threading.Lock()

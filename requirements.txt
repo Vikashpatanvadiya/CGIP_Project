@@ -1,15 +1,16 @@
 flask==3.1.0
 flask-cors==5.0.0
-opencv-contrib-python==4.14.0.94
+gunicorn==23.0.0
+waitress==3.0.2
+opencv-python==4.14.0.94
 numpy==2.5.3
 openpyxl==3.1.5
 pytest==8.3.4
 
 # Deep face recognition (ArcFace + SCRFD detector). insightface pulls in
-# onnxruntime, onnx, scikit-image, scipy. NOTE: insightface also depends on
-# opencv-python, which collides with opencv-contrib-python (both own the cv2/
-# folder). After install, run:  pip uninstall -y opencv-python
-# then: pip install --force-reinstall --no-deps opencv-contrib-python==4.14.0.94
+# onnxruntime, onnx, scikit-image, scipy, and opencv-python. We standardize on
+# opencv-python (the package insightface depends on) since the code uses no
+# contrib-only features — this avoids the old opencv-contrib cv2/ collision.
 insightface==2.1
 onnxruntime==1.30.0
 
